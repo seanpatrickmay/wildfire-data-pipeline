@@ -1,0 +1,31 @@
+{
+  "description": "Fire configurations for the data pipeline. Each fire has AOI, timing, and source metadata.",
+  "fires": {
+    "Kincade": {
+      "year": 2019,
+      "aoi": [-122.96, 38.50, -122.59, 38.87],
+      "start_utc": "2019-10-24T00:00:00Z",
+      "n_hours": 160,
+      "official_acres": 77758
+    },
+    "Walker": {
+      "year": 2019,
+      "aoi": [-120.65, 38.90, -120.35, 39.20],
+      "start_utc": "2019-09-05T00:00:00Z",
+      "n_hours": 295,
+      "official_acres": 54612
+    }
+  },
+  "pipeline_config": {
+    "export_scale_m": 2004,
+    "export_crs": "EPSG:3857",
+    "goes_confidence_threshold": 0.30,
+    "label_smoothing": {
+      "method": "majority_vote",
+      "window_hours": 5,
+      "min_votes": 2
+    },
+    "viirs_temporal_window_hours": 12,
+    "cloud_masking": true
+  }
+}
