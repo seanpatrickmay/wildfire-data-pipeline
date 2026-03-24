@@ -289,8 +289,31 @@ def download_features(
                 for k in ["pdsi", "eddi_14d", "eddi_30d"]:
                     slow_bands[k] = np.zeros(shape, dtype=np.float32)
 
-    # --- Hourly features (RTMA + soil moisture) ---
-    from wildfire_pipeline.gee.weather import get_hourly_rtma, get_hourly_soil_moisture
+    # --- Slow-varying: TROPOMI smoke aerosol index ---
+    from wildfire_pipeline.gee.features import get_smoke_aerosol_index
+
+    try:
+        fire_end = start.advance(n_hours, "hour")
+        smoke_img = get_smoke_aerosol_index(aoi, start, fire_end).reproject(
+            crs=pipeline.export_crs, scale=pipeline.export_scale_m
+        )
+        smoke_sample = safe_sample_rectangle(smoke_img, aoi)
+        smoke_info = safe_get_info(smoke_sample)
+        for band, values in smoke_info["properties"].items():
+            slow_bands[band] = np.array(values, dtype=np.float32)
+    except Exception as e:
+        if isinstance(e, (TypeError, AttributeError, KeyError, ImportError)):
+            raise
+        logger.warning("slow_feature_failed", feature="smoke_aerosol", error=str(e))
+        slow_bands["smoke_aerosol_index"] = np.zeros((n_rows, n_cols), dtype=np.float32)
+
+    # --- Hourly features (RTMA + soil moisture + precipitation) ---
+    from wildfire_pipeline.gee.weather import (
+        get_hourly_gpm_precipitation,
+        get_hourly_precipitation,
+        get_hourly_rtma,
+        get_hourly_soil_moisture,
+    )
 
     hourly_stacks: dict[str, list[np.ndarray]] = {}
     for h in range(n_hours):
@@ -299,13 +322,22 @@ def download_features(
 
         try:
             soil = get_hourly_soil_moisture(aoi, hour_start, hour_end)
+            precip_era5 = get_hourly_precipitation(aoi, hour_start, hour_end)
+            precip_gpm = get_hourly_gpm_precipitation(aoi, hour_start, hour_end)
             if pipeline.rtma_wind:
                 rtma = get_hourly_rtma(aoi, hour_start, hour_end)
-                combined = rtma.addBands(soil).reproject(
-                    crs=pipeline.export_crs, scale=pipeline.export_scale_m
+                combined = (
+                    rtma.addBands(soil)
+                    .addBands(precip_era5)
+                    .addBands(precip_gpm)
+                    .reproject(crs=pipeline.export_crs, scale=pipeline.export_scale_m)
                 )
             else:
-                combined = soil.reproject(crs=pipeline.export_crs, scale=pipeline.export_scale_m)
+                combined = (
+                    soil.addBands(precip_era5)
+                    .addBands(precip_gpm)
+                    .reproject(crs=pipeline.export_crs, scale=pipeline.export_scale_m)
+                )
 
             info = safe_get_info(safe_sample_rectangle(combined, aoi))  # ONE call
             props = info["properties"]
@@ -321,9 +353,18 @@ def download_features(
             logger.warning("feature_hour_failed", hour=h, error=str(e))
             shape = (n_rows, n_cols)
             fallback_keys = (
-                ["ugrd", "vgrd", "gust", "tmp", "dpt", "soil_moisture"]
+                [
+                    "ugrd",
+                    "vgrd",
+                    "gust",
+                    "tmp",
+                    "dpt",
+                    "soil_moisture",
+                    "precipitation_m",
+                    "gpm_precipitation_mmhr",
+                ]
                 if pipeline.rtma_wind
-                else ["soil_moisture"]
+                else ["soil_moisture", "precipitation_m", "gpm_precipitation_mmhr"]
             )
             for key in fallback_keys:
                 hourly_stacks.setdefault(key, []).append(np.zeros(shape, dtype=np.float32))

@@ -26,3 +26,10 @@ class TestLstConfig:
         from wildfire_pipeline.gee.features import LST_DATASET
 
         assert LST_DATASET == "MODIS/061/MOD11A1"
+
+
+class TestSmokeAerosolConfig:
+    def test_tropomi_dataset_id(self) -> None:
+        from wildfire_pipeline.gee.features import TROPOMI_AAI_DATASET
+
+        assert TROPOMI_AAI_DATASET == "COPERNICUS/S5P/OFFL/L3_AER_AI"

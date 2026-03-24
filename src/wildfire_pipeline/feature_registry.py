@@ -43,6 +43,19 @@ FEATURE_REGISTRY: dict[str, FeatureSpec] = {
     "soil_moisture": FeatureSpec(
         "soil_moisture", "m3/m3", "ECMWF/ERA5_LAND", "hourly", 0.0, 0.6, "continuous", "zscore"
     ),
+    "precipitation_m": FeatureSpec(
+        "precipitation_m", "m", "ECMWF/ERA5_LAND", "hourly", 0.0, 0.1, "continuous", "zscore"
+    ),
+    "gpm_precipitation_mmhr": FeatureSpec(
+        "gpm_precipitation_mmhr",
+        "mm/hr",
+        "NASA/GPM_L3/IMERG_V07",
+        "hourly",
+        0.0,
+        100.0,
+        "continuous",
+        "zscore",
+    ),
     # --- GRIDMET weather (daily) ---
     "erc": FeatureSpec(
         "erc", "BTU/ft2", "IDAHO_EPSCOR/GRIDMET", "daily", 0.0, 150.0, "continuous", "zscore"
@@ -92,6 +105,16 @@ FEATURE_REGISTRY: dict[str, FeatureSpec] = {
     ),
     "eddi_30d": FeatureSpec(
         "eddi_30d", "index", "GRIDMET/DROUGHT", "slow", -3.0, 3.0, "continuous", "zscore"
+    ),
+    "smoke_aerosol_index": FeatureSpec(
+        "smoke_aerosol_index",
+        "index",
+        "COPERNICUS/S5P",
+        "slow",
+        -5.0,
+        15.0,
+        "continuous",
+        "zscore",
     ),
     # --- Terrain (static) ---
     "slope_deg": FeatureSpec(

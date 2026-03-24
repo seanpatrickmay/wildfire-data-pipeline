@@ -3,7 +3,8 @@
 Sources:
 - RTMA (NOAA/NWS/RTMA): 2.5km hourly — wind u/v, gust, temp, dewpoint
 - GRIDMET (IDAHO_EPSCOR/GRIDMET): 4km daily — ERC, BI, fuel moisture, VPD, wind, humidity
-- ERA5-Land (ECMWF/ERA5_LAND/HOURLY): 11km hourly — soil moisture
+- ERA5-Land (ECMWF/ERA5_LAND/HOURLY): 11km hourly — soil moisture, precipitation
+- GPM IMERG (NASA/GPM_L3/IMERG_V07): 10km, 30-min — precipitation rate
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ GRIDMET_FIRE_BANDS = ["erc", "bi", "fm100", "fm1000", "vpd", "rmin", "rmax", "vs
 
 ERA5_LAND_DATASET = "ECMWF/ERA5_LAND/HOURLY"
 GRIDMET_DROUGHT_DATASET = "GRIDMET/DROUGHT"
+GPM_IMERG_DATASET = "NASA/GPM_L3/IMERG_V07"
 
 
 def get_hourly_rtma(aoi: ee.Geometry, hour_start: ee.Date, hour_end: ee.Date) -> ee.Image:
@@ -53,6 +55,32 @@ def get_hourly_soil_moisture(aoi: ee.Geometry, hour_start: ee.Date, hour_end: ee
         .select("volumetric_soil_water_layer_1")
     )
     result: ee.Image = era5.mean().unmask(0).rename("soil_moisture").toFloat()
+    return result
+
+
+def get_hourly_precipitation(aoi: ee.Geometry, hour_start: ee.Date, hour_end: ee.Date) -> ee.Image:
+    """Get ERA5-Land hourly total precipitation."""
+    era5 = (
+        ee.ImageCollection(ERA5_LAND_DATASET)
+        .filterDate(hour_start, hour_end)
+        .filterBounds(aoi)
+        .select("total_precipitation_sum")
+    )
+    result: ee.Image = era5.sum().unmask(0).rename("precipitation_m").toFloat()
+    return result
+
+
+def get_hourly_gpm_precipitation(
+    aoi: ee.Geometry, hour_start: ee.Date, hour_end: ee.Date
+) -> ee.Image:
+    """Get GPM IMERG precipitation rate (mm/hr), 30-min cadence averaged to hourly."""
+    gpm = (
+        ee.ImageCollection(GPM_IMERG_DATASET)
+        .filterDate(hour_start, hour_end)
+        .filterBounds(aoi)
+        .select("precipitation")
+    )
+    result: ee.Image = gpm.mean().unmask(0).rename("gpm_precipitation_mmhr").toFloat()
     return result
 
 

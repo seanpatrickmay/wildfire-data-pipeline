@@ -51,3 +51,10 @@ class TestEra5Config:
         from wildfire_pipeline.gee.weather import GRIDMET_DROUGHT_DATASET
 
         assert GRIDMET_DROUGHT_DATASET == "GRIDMET/DROUGHT"
+
+
+class TestPrecipitationConfig:
+    def test_gpm_dataset_id(self) -> None:
+        from wildfire_pipeline.gee.weather import GPM_IMERG_DATASET
+
+        assert GPM_IMERG_DATASET == "NASA/GPM_L3/IMERG_V07"
