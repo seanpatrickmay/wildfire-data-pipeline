@@ -174,14 +174,9 @@ def detect_frp_outliers(
     capped = np.maximum(capped, 0.0)
     reliability = np.where(frp < 0, 0.0, reliability)
 
-    # Percentile cap (winsorization)
-    fire_frp = frp[frp > 0]
-    if len(fire_frp) > 0:
-        cap_value = min(
-            float(np.percentile(fire_frp, cap_percentile)),
-            FRP_SATURATION_MW,
-        )
-        capped = np.minimum(capped, cap_value)
+    # Fixed physical cap — avoids temporal dependency from data-driven percentile
+    cap_value = FRP_PRACTICAL_CEILING_MW  # 2000.0 MW
+    capped = np.minimum(capped, cap_value)
 
     # Reliability scoring based on physical ranges
     # Above practical ceiling: reduced reliability

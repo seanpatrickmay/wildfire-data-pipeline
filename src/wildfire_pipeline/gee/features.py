@@ -34,19 +34,18 @@ def get_pre_fire_ndvi(aoi: ee.Geometry, fire_start: ee.Date) -> ee.Image:
     return result
 
 
-def get_smoke_aerosol_index(aoi: ee.Geometry, fire_start: ee.Date, fire_end: ee.Date) -> ee.Image:
-    """Get TROPOMI UV Aerosol Index (smoke detection above clouds).
+def get_smoke_aerosol_index(aoi: ee.Geometry, fire_start: ee.Date) -> ee.Image:
+    """Get TROPOMI UV Aerosol Index from before fire start (no forward bias).
 
+    Uses the 7-day window before fire start to capture background smoke levels.
     Positive values indicate UV-absorbing aerosols (smoke, dust).
-    Values > 1.0 suggest significant smoke. Works through clouds.
     """
     collection = (
         ee.ImageCollection(TROPOMI_AAI_DATASET)
-        .filterDate(fire_start, fire_end)
+        .filterDate(fire_start.advance(-7, "day"), fire_start)
         .filterBounds(aoi)
         .select("absorbing_aerosol_index")
     )
-    # Use max AAI across the fire period — smoke persists
     result: ee.Image = collection.max().unmask(0).rename("smoke_aerosol_index").toFloat()
     return result
 

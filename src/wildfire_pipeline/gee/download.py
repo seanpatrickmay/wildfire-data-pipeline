@@ -293,8 +293,7 @@ def download_features(
     from wildfire_pipeline.gee.features import get_smoke_aerosol_index
 
     try:
-        fire_end = start.advance(n_hours, "hour")
-        smoke_img = get_smoke_aerosol_index(aoi, start, fire_end).reproject(
+        smoke_img = get_smoke_aerosol_index(aoi, start).reproject(
             crs=pipeline.export_crs, scale=pipeline.export_scale_m
         )
         smoke_sample = safe_sample_rectangle(smoke_img, aoi)
@@ -381,8 +380,9 @@ def download_features(
     n_days = (n_hours + 23) // 24
     daily_stacks: dict[str, list[np.ndarray]] = {}
     for d in range(n_days):
-        day_start = start.advance(d, "day")
-        day_end = start.advance(d + 1, "day")
+        # Use previous day's weather to avoid forward bias
+        day_start = start.advance(d - 1, "day")
+        day_end = start.advance(d, "day")
 
         try:
             gridmet = get_daily_gridmet(aoi, day_start, day_end)

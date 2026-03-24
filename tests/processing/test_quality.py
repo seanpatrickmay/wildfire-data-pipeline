@@ -381,7 +381,7 @@ class TestDetectFrpOutliers:
         assert reliability[0, 0, 0] == pytest.approx(0.5)
 
     def test_frp_above_saturation_reliability_zero_and_capped(self) -> None:
-        """FRP above 5000 MW -> reliability = 0.0, value capped."""
+        """FRP above 5000 MW -> reliability = 0.0, value capped at practical ceiling."""
         T, H, W = 3, 2, 2
         frp = np.full((T, H, W), 100.0, dtype=np.float32)
         frp[0, 0, 0] = 8000.0  # above saturation
@@ -389,23 +389,21 @@ class TestDetectFrpOutliers:
         capped, reliability = detect_frp_outliers(frp)
 
         assert reliability[0, 0, 0] == 0.0
-        # Capped value should not exceed saturation (percentile cap uses
-        # min(percentile, saturation))
-        assert capped[0, 0, 0] <= FRP_SATURATION_MW
+        # Fixed physical cap at FRP_PRACTICAL_CEILING_MW (2000)
+        assert capped[0, 0, 0] == pytest.approx(FRP_PRACTICAL_CEILING_MW)
 
-    def test_percentile_capping_extreme_outlier(self) -> None:
-        """An extreme outlier should be capped to the p99.5 value."""
+    def test_fixed_cap_at_practical_ceiling(self) -> None:
+        """Values above practical ceiling are capped at 2000 MW (no percentile)."""
         T, H, W = 5, 4, 4
-        # 79 pixels at 100, 1 pixel at 4000 (within saturation range)
         frp = np.full((T, H, W), 100.0, dtype=np.float32)
-        frp[0, 0, 0] = 4000.0  # extreme outlier
+        frp[0, 0, 0] = 4000.0  # above practical ceiling
 
         capped, _ = detect_frp_outliers(frp, cap_percentile=99.5)
 
-        # The 99.5th percentile of the positive values should cap the outlier
-        positive_vals = frp[frp > 0]
-        expected_cap = min(float(np.percentile(positive_vals, 99.5)), FRP_SATURATION_MW)
-        assert capped[0, 0, 0] == pytest.approx(expected_cap, rel=1e-4)
+        # Fixed physical cap at FRP_PRACTICAL_CEILING_MW — no temporal dependency
+        assert capped[0, 0, 0] == pytest.approx(FRP_PRACTICAL_CEILING_MW)
+        # Normal values below the cap are unchanged
+        assert capped[1, 0, 0] == pytest.approx(100.0)
 
     def test_confidence_crosscheck_frp_positive_confidence_zero(self) -> None:
         """FRP > 0 but confidence == 0 -> reliability = 0.0."""
