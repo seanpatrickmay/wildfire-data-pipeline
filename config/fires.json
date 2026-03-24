@@ -14,6 +14,41 @@
       "start_utc": "2019-09-05T00:00:00Z",
       "n_hours": 295,
       "official_acres": 54612
+    },
+    "CampFire": {
+      "year": 2018,
+      "aoi": [-121.70, 39.65, -121.35, 39.90],
+      "start_utc": "2018-11-08T14:30:00Z",
+      "n_hours": 409,
+      "official_acres": 153336
+    },
+    "GlassFire": {
+      "year": 2020,
+      "aoi": [-122.70, 38.50, -122.35, 38.70],
+      "start_utc": "2020-09-27T11:00:00Z",
+      "n_hours": 400,
+      "official_acres": 67484
+    },
+    "CaldorFire": {
+      "year": 2021,
+      "aoi": [-120.70, 38.45, -119.95, 38.85],
+      "start_utc": "2021-08-15T01:54:00Z",
+      "n_hours": 500,
+      "official_acres": 221835
+    },
+    "MosquitoFire": {
+      "year": 2022,
+      "aoi": [-120.95, 38.85, -120.55, 39.15],
+      "start_utc": "2022-09-07T01:00:00Z",
+      "n_hours": 500,
+      "official_acres": 76788
+    },
+    "SmithRiverComplex": {
+      "year": 2023,
+      "aoi": [-124.10, 41.75, -123.60, 42.10],
+      "start_utc": "2023-08-15T14:00:00Z",
+      "n_hours": 500,
+      "official_acres": 95107
     }
   },
   "pipeline_config": {
