@@ -20,6 +20,8 @@ class FeatureSpec:
     range_max: float
     dtype_hint: str  # "continuous", "binary", "categorical"
     normalization: str  # "zscore", "minmax", "none", "embedding"
+    safe_as_input: bool = True  # False for targets, diagnostics, and loss weights
+    requires_temporal_lag: bool = False  # True if must be used at t-1 to predict t
 
 
 FEATURE_REGISTRY: dict[str, FeatureSpec] = {
@@ -179,14 +181,119 @@ FEATURE_REGISTRY: dict[str, FeatureSpec] = {
     "built_up": FeatureSpec(
         "built_up", "m2", "JRC/GHSL", "static", 0.0, 10000.0, "continuous", "zscore"
     ),
-    # --- Derived spatial (from labels) ---
-    "distance_to_fire": FeatureSpec(
-        "distance_to_fire", "pixels", "derived", "hourly", -1.0, 100.0, "continuous", "zscore"
+    # --- Derived spatial (from labels, safe ONLY at t-1) ---
+    "_lagged_distance_to_fire": FeatureSpec(
+        "_lagged_distance_to_fire",
+        "pixels",
+        "derived",
+        "hourly",
+        -1.0,
+        100.0,
+        "continuous",
+        "zscore",
+        safe_as_input=True,
+        requires_temporal_lag=True,
     ),
-    "fire_neighborhood": FeatureSpec(
-        "fire_neighborhood", "fraction", "derived", "hourly", 0.0, 1.0, "continuous", "none"
+    "_lagged_fire_neighborhood": FeatureSpec(
+        "_lagged_fire_neighborhood",
+        "fraction",
+        "derived",
+        "hourly",
+        0.0,
+        1.0,
+        "continuous",
+        "none",
+        safe_as_input=True,
+        requires_temporal_lag=True,
+    ),
+    # --- Targets (NOT safe as model input) ---
+    "labels": FeatureSpec(
+        "labels", "binary", "pipeline", "hourly", 0.0, 1.0, "binary", "none", safe_as_input=False
+    ),
+    "soft_labels": FeatureSpec(
+        "soft_labels",
+        "probability",
+        "pipeline",
+        "hourly",
+        0.0,
+        1.0,
+        "continuous",
+        "none",
+        safe_as_input=False,
+    ),
+    # --- Loss weights (NOT safe as model input) ---
+    "loss_weights": FeatureSpec(
+        "loss_weights",
+        "weight",
+        "pipeline",
+        "hourly",
+        0.0,
+        1.0,
+        "continuous",
+        "none",
+        safe_as_input=False,
+    ),
+    # --- Diagnostics (NOT safe as model input) ---
+    "_diag_raw_confidence": FeatureSpec(
+        "_diag_raw_confidence",
+        "probability",
+        "GOES",
+        "hourly",
+        0.0,
+        1.0,
+        "continuous",
+        "none",
+        safe_as_input=False,
+    ),
+    "_diag_capped_frp": FeatureSpec(
+        "_diag_capped_frp",
+        "MW",
+        "GOES",
+        "hourly",
+        0.0,
+        2000.0,
+        "continuous",
+        "none",
+        safe_as_input=False,
+    ),
+    "_diag_frp_reliability": FeatureSpec(
+        "_diag_frp_reliability",
+        "score",
+        "pipeline",
+        "hourly",
+        0.0,
+        1.0,
+        "continuous",
+        "none",
+        safe_as_input=False,
+    ),
+    "_diag_was_imputed": FeatureSpec(
+        "_diag_was_imputed",
+        "binary",
+        "pipeline",
+        "hourly",
+        0.0,
+        1.0,
+        "binary",
+        "none",
+        safe_as_input=False,
     ),
 }
+
+
+def get_safe_input_features() -> list[str]:
+    """Return names of features that are safe to use as model inputs.
+
+    WARNING: Features with requires_temporal_lag=True must be used at
+    time t-1 to predict time t. Using them at the same timestep as the
+    target is label leakage.
+    """
+    return [name for name, spec in FEATURE_REGISTRY.items() if spec.safe_as_input]
+
+
+def get_lagged_features() -> list[str]:
+    """Return features that require a temporal lag (t-1) to avoid label leakage."""
+    return [name for name, spec in FEATURE_REGISTRY.items() if spec.requires_temporal_lag]
 
 
 def get_feature_spec(name: str) -> FeatureSpec | None:

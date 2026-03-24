@@ -221,7 +221,7 @@ def process_fire(
         # Flicker: fire at t, no fire at t+1
         flicker_count = int(((smoothed[:-1] == 1) & (smoothed[1:] == 0)).sum())
 
-        # Oracle F1: how well does "copy t to predict t+1" work?
+        # Oracle F1 on SMOOTHED labels (inflated by temporal smoothing)
         valid_pairs = (validity[:-1] > 0) & (validity[1:] > 0)
         pred_fire = (smoothed[:-1] == 1) & valid_pairs
         true_fire = (smoothed[1:] == 1) & valid_pairs
@@ -238,6 +238,21 @@ def process_fire(
     oracle_f1 = (
         2 * oracle_p * oracle_r / (oracle_p + oracle_r) if (oracle_p + oracle_r) > 0 else 0.0
     )
+
+    # Oracle F1 on RAW (pre-smoothing) binary labels — unbiased baseline
+    raw_binary = (conf >= cfg.goes_confidence_threshold).astype(np.float32)
+    if T > 1:
+        raw_valid_pairs = (validity[:-1] > 0) & (validity[1:] > 0)
+        raw_pred = (raw_binary[:-1] == 1) & raw_valid_pairs
+        raw_truth = (raw_binary[1:] == 1) & raw_valid_pairs
+        raw_tp = int((raw_pred & raw_truth).sum())
+        raw_fp = int((raw_pred & ~raw_truth).sum())
+        raw_fn = int((~raw_pred & raw_truth).sum())
+        raw_p = raw_tp / (raw_tp + raw_fp) if (raw_tp + raw_fp) > 0 else 0.0
+        raw_r = raw_tp / (raw_tp + raw_fn) if (raw_tp + raw_fn) > 0 else 0.0
+        oracle_f1_raw = 2 * raw_p * raw_r / (raw_p + raw_r) if (raw_p + raw_r) > 0 else 0.0
+    else:
+        oracle_f1_raw = 0.0
 
     gap_stats = compute_gap_stats(validity)
 
@@ -256,7 +271,8 @@ def process_fire(
     logger.info(
         "quality_metrics",
         flicker_rate=round(flicker_rate, 4),
-        oracle_f1=round(oracle_f1, 4),
+        oracle_f1_smoothed=round(oracle_f1, 4),
+        oracle_f1_raw=round(oracle_f1_raw, 4),
         max_gap_hours=gap_stats["max_gap_overall"],
         isolated_removed=n_removed,
         imputed_pixels=int(was_imputed.sum()),
@@ -274,16 +290,21 @@ def process_fire(
     fire_fraction = n_fire_in_valid / max(n_valid_pixels, 1)
 
     out_arrays = {
+        # === TARGETS (what the model predicts) ===
         "labels": smoothed,
         "soft_labels": soft_labels,
+        # === INPUT-SAFE (can be used as model features) ===
         "validity": validity,
-        "quality_weights": quality_weights,
-        "raw_confidence": conf,
-        "capped_frp": capped_frp,
-        "frp_reliability": frp_reliability,
-        "was_imputed": was_imputed,
-        "distance_to_fire": distance_to_fire,
-        "fire_neighborhood": fire_neighborhood,
+        # === LOSS WEIGHTS (for training loss only, NOT model input) ===
+        "loss_weights": quality_weights,
+        # === DIAGNOSTICS (for analysis only, NOT model input or targets) ===
+        "_diag_raw_confidence": conf,
+        "_diag_capped_frp": capped_frp,
+        "_diag_frp_reliability": frp_reliability,
+        "_diag_was_imputed": was_imputed,
+        # === LAGGED FEATURES (safe ONLY at t-1, NOT at t) ===
+        "_lagged_distance_to_fire": distance_to_fire,
+        "_lagged_fire_neighborhood": fire_neighborhood,
     }
     out_metadata: dict[str, Any] = {
         **input_metadata,
@@ -304,7 +325,10 @@ def process_fire(
             "isolated_pixels_removed": n_removed,
             "imputed_pixels": int(was_imputed.sum()),
             "flicker_rate": flicker_rate,
-            "oracle_f1": oracle_f1,
+            "oracle_f1_smoothed": oracle_f1,
+            "oracle_f1_raw": oracle_f1_raw,
+            "oracle_precision": oracle_p,
+            "oracle_recall": oracle_r,
             "cloud_excluded_fraction": float(1.0 - validity.mean()),
             "max_gap_hours": gap_stats["max_gap_overall"],
             "mean_gap_length": gap_stats["mean_gap_length"],
@@ -312,6 +336,27 @@ def process_fire(
             "fire_fraction": fire_fraction,
             "pos_weight": round(1.0 / max(fire_fraction, 0.001), 2),
             **frp_stats,
+        },
+        "usage_guide": {
+            "safe_input_features": [
+                "Use arrays from the *_Features.npz file (weather, terrain, etc.)",
+                "validity is safe as an input feature",
+                "Arrays prefixed with _lagged_ are safe ONLY at t-1 to predict t",
+            ],
+            "targets": ["labels (binary)", "soft_labels (continuous)"],
+            "loss_weights_only": ["loss_weights — do NOT use as model input"],
+            "diagnostics_only": [
+                "_diag_* arrays are for analysis, NOT model input",
+                "_diag_raw_confidence IS the label before thresholding",
+                "_diag_capped_frp nonzero implies fire detection",
+            ],
+            "limitations": [
+                "All fires are major California incidents (54k-222k acres)",
+                "No small/suppressed fires — model will have fire-growth bias",
+                "oracle_f1_smoothed is inflated by temporal smoothing — compare with oracle_f1_raw",
+                "Metrics exclude cloud-obscured pixels (the hardest prediction cases)",
+                "Evaluation should use leave-one-fire-out, not within-fire temporal splits",
+            ],
         },
     }
 

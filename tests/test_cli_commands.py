@@ -73,7 +73,7 @@ class TestValidateCommand:
         arrays = {
             "labels": np.zeros((T, H, W), dtype=np.float32),
             "validity": np.ones((T, H, W), dtype=np.float32),
-            "raw_confidence": np.full((T, H, W), 0.2, dtype=np.float32),
+            "_diag_raw_confidence": np.full((T, H, W), 0.2, dtype=np.float32),
         }
         # Add some fire pixels so we don't get "no fire" warning (which still passes)
         arrays["labels"][3:6, 1:3, 1:3] = 1.0

@@ -55,7 +55,7 @@ class TestSingleTimestepProcessFire:
         assert out_arrays["labels"].shape == (T, H, W)
         # T=1 means no flicker possible and no oracle F1
         assert out_meta["quality"]["flicker_rate"] == 0.0
-        assert out_meta["quality"]["oracle_f1"] == 0.0
+        assert out_meta["quality"]["oracle_f1_smoothed"] == 0.0
 
 
 class TestCliProcessExceptionHandler:

@@ -149,7 +149,7 @@ def validate(
         result = validate_labels(
             labels=arrays["labels"],
             validity=arrays["validity"],
-            raw_confidence=arrays["raw_confidence"],
+            raw_confidence=arrays["_diag_raw_confidence"],
         )
     else:
         logger.error("unknown_data_format", keys=list(arrays.keys()))

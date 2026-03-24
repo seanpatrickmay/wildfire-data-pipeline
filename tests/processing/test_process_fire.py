@@ -51,13 +51,13 @@ class TestProcessFireHappyPath:
             "labels",
             "soft_labels",
             "validity",
-            "raw_confidence",
-            "quality_weights",
-            "capped_frp",
-            "frp_reliability",
-            "was_imputed",
-            "distance_to_fire",
-            "fire_neighborhood",
+            "loss_weights",
+            "_diag_raw_confidence",
+            "_diag_capped_frp",
+            "_diag_frp_reliability",
+            "_diag_was_imputed",
+            "_lagged_distance_to_fire",
+            "_lagged_fire_neighborhood",
         }
         assert set(out_arrays.keys()) == expected_keys
 
@@ -87,7 +87,7 @@ class TestProcessFireHappyPath:
             tmp_path, sample_fire_arrays, sample_metadata, pipeline_config
         )
         np.testing.assert_array_equal(
-            out_arrays["raw_confidence"],
+            out_arrays["_diag_raw_confidence"],
             sample_fire_arrays["data"].astype(np.float32),
         )
 
@@ -316,7 +316,7 @@ class TestQualityMetricsComputed:
         assert "raw_fire_pixels" in quality
         assert "smoothed_fire_pixels" in quality
         assert "flicker_rate" in quality
-        assert "oracle_f1" in quality
+        assert "oracle_f1_smoothed" in quality
         assert "cloud_excluded_fraction" in quality
 
     def test_processing_section_has_expected_keys(
@@ -346,7 +346,7 @@ class TestQualityMetricsComputed:
         _, out_meta = _save_and_process(
             tmp_path, sample_fire_arrays, sample_metadata, pipeline_config
         )
-        f1 = out_meta["quality"]["oracle_f1"]
+        f1 = out_meta["quality"]["oracle_f1_smoothed"]
         assert 0.0 <= f1 <= 1.0
 
     def test_cloud_excluded_fraction_matches_validity(
@@ -599,7 +599,7 @@ class TestAllZerosInput:
 
         _, out_meta = _save_and_process(tmp_path, arrays, metadata, pipeline_config)
 
-        assert out_meta["quality"]["oracle_f1"] == 0.0
+        assert out_meta["quality"]["oracle_f1_smoothed"] == 0.0
 
     def test_all_zeros_with_all_clouds(self, tmp_path, pipeline_config):
         """Zero fire + full cloud coverage should not crash."""
@@ -696,13 +696,13 @@ class TestMissingInputArrays:
         out_arrays, _out_meta = _save_and_process(tmp_path, arrays, metadata, pipeline_config)
 
         assert "labels" in out_arrays
-        assert "capped_frp" in out_arrays
+        assert "_diag_capped_frp" in out_arrays
         # Capped FRP should be all zeros since input was missing
-        assert out_arrays["capped_frp"].sum() == 0.0
+        assert out_arrays["_diag_capped_frp"].sum() == 0.0
         # FRP reliability should still be computed (all 1.0 since no outliers)
-        assert out_arrays["frp_reliability"].min() >= 0.0
-        # Quality weights should still be valid
-        assert out_arrays["quality_weights"].max() <= 1.0
+        assert out_arrays["_diag_frp_reliability"].min() >= 0.0
+        # Loss weights should still be valid
+        assert out_arrays["loss_weights"].max() <= 1.0
 
     def test_missing_cloud_mask_uses_zeros(self, tmp_path, pipeline_config):
         """Missing cloud_mask should default to no clouds (all clear)."""
@@ -750,5 +750,5 @@ class TestMissingInputArrays:
 
         assert "labels" in out_arrays
         assert "validity" in out_arrays
-        assert "quality_weights" in out_arrays
+        assert "loss_weights" in out_arrays
         assert out_arrays["labels"].shape == (T, H, W)

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from wildfire_pipeline.feature_registry import FEATURE_REGISTRY, FeatureSpec, get_feature_spec
+from wildfire_pipeline.feature_registry import (
+    FEATURE_REGISTRY,
+    FeatureSpec,
+    get_feature_spec,
+    get_safe_input_features,
+)
 
 
 class TestFeatureRegistry:
@@ -35,3 +40,24 @@ class TestFeatureRegistry:
         valid = {"zscore", "minmax", "none", "embedding"}
         for name, spec in FEATURE_REGISTRY.items():
             assert spec.normalization in valid, f"{name} has invalid normalization"
+
+    def test_safe_input_features_excludes_targets(self) -> None:
+        safe = get_safe_input_features()
+        assert "labels" not in safe
+        assert "soft_labels" not in safe
+        assert "_diag_raw_confidence" not in safe
+        assert "loss_weights" not in safe
+
+    def test_safe_input_features_includes_weather(self) -> None:
+        safe = get_safe_input_features()
+        assert "erc" in safe
+        assert "ugrd" in safe
+        assert "slope_deg" in safe
+
+    def test_lagged_features_identified(self) -> None:
+        from wildfire_pipeline.feature_registry import get_lagged_features
+
+        lagged = get_lagged_features()
+        assert "_lagged_distance_to_fire" in lagged
+        assert "_lagged_fire_neighborhood" in lagged
+        assert "erc" not in lagged
