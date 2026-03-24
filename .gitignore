@@ -1,8 +1,27 @@
 __pycache__/
 *.pyc
 .env
+.env.local
 data/
 *.tif
 *.npz
 .claude/
 .DS_Store
+
+# DVC
+*.dvc/cache
+.dvc/tmp
+.dvc/cache
+
+# Keep data .gitkeep files
+!data/.gitkeep
+
+# Build artifacts
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+
+# Lock file should be committed but listed here for awareness
+# uv.lock

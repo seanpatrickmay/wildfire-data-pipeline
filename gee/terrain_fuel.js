@@ -1,3 +1,6 @@
+// NOTE: This script is for interactive exploration in the GEE Code Editor.
+// For batch processing, use the Python API: `wildfire download <fire_name>`
+
 /**
  * Terrain & Fuel Data Export
  *
@@ -13,12 +16,15 @@
  */
 
 // ═══════════════════════════════════════════════════════════════════
-// Configuration
+// Configuration — can be overridden via URL parameters
+// Usage: append ?fire=Walker&year=2019&... to the script URL
 // ═══════════════════════════════════════════════════════════════════
-var FIRE_NAME = 'Kincade';
-var FIRE_YEAR = 2019;
-var AOI = ee.Geometry.Rectangle([-122.96, 38.50, -122.59, 38.87]);
-var EXPORT_SCALE = 2004;
+var FIRE_NAME = ui.url.get('fire', 'Kincade');
+var FIRE_YEAR = parseInt(ui.url.get('year', '2019'), 10);
+var aoi_str = ui.url.get('aoi', '-122.96,38.50,-122.59,38.87');
+var aoi_parts = aoi_str.split(',').map(Number);
+var AOI = ee.Geometry.Rectangle(aoi_parts);
+var EXPORT_SCALE = parseInt(ui.url.get('scale', '2004'), 10);
 var EXPORT_CRS = 'EPSG:3857';
 
 // ═══════════════════════════════════════════════════════════════════

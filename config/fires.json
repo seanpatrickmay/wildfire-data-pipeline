@@ -25,7 +25,8 @@
       "window_hours": 5,
       "min_votes": 2
     },
-    "viirs_temporal_window_hours": 12,
-    "cloud_masking": true
+    "cloud_masking": true,
+    "download_features": true,
+    "rtma_wind": true
   }
 }

@@ -1,3 +1,6 @@
+// NOTE: This script is for interactive exploration in the GEE Code Editor.
+// For batch processing, use the Python API: `wildfire download <fire_name>`
+
 /**
  * Multi-Source Fire Detection Pipeline
  *
@@ -11,26 +14,31 @@
  */
 
 // ═══════════════════════════════════════════════════════════════════
-// Configuration — edit these for each fire
+// Configuration — can be overridden via URL parameters
+// Usage: append ?fire=Walker&year=2019&... to the script URL
 // ═══════════════════════════════════════════════════════════════════
-var FIRE_NAME = 'Kincade';
-var FIRE_YEAR = 2019;
-var AOI = ee.Geometry.Rectangle([-122.96, 38.50, -122.59, 38.87]);
-var START_UTC = ee.Date('2019-10-24T00:00:00Z');
-var N_HOURS = 160;
-var EXPORT_SCALE = 2004;  // GOES native resolution (meters)
+var FIRE_NAME = ui.url.get('fire', 'Kincade');
+var FIRE_YEAR = parseInt(ui.url.get('year', '2019'), 10);
+var aoi_str = ui.url.get('aoi', '-122.96,38.50,-122.59,38.87');
+var aoi_parts = aoi_str.split(',').map(Number);
+var AOI = ee.Geometry.Rectangle(aoi_parts);
+var START_UTC = ee.Date(ui.url.get('start', '2019-10-24T00:00:00Z'));
+var N_HOURS = parseInt(ui.url.get('hours', '160'), 10);
+var EXPORT_SCALE = parseInt(ui.url.get('scale', '2004'), 10);
 var EXPORT_CRS = 'EPSG:3857';
 
 // ═══════════════════════════════════════════════════════════════════
 // Data Sources
 // ═══════════════════════════════════════════════════════════════════
 
-// GOES-16 (East) and GOES-17 (West) — prefer CONUS (5-min) over Full Disk (10-min)
+// GOES-17 (West) decommissioned Jan 2023, replaced by GOES-18
+// Use GOES-17 for fires before 2023, GOES-18 for 2023+
+var GOES_WEST_ID = FIRE_YEAR < 2023 ? '17' : '18';
+
 var goes16_conus = ee.ImageCollection('NOAA/GOES/16/FDCC');
-var goes17_conus = ee.ImageCollection('NOAA/GOES/17/FDCC');
-// Fallback to Full Disk if CONUS unavailable
+var goes17_conus = ee.ImageCollection('NOAA/GOES/' + GOES_WEST_ID + '/FDCC');
 var goes16_full = ee.ImageCollection('NOAA/GOES/16/FDCF');
-var goes17_full = ee.ImageCollection('NOAA/GOES/17/FDCF');
+var goes17_full = ee.ImageCollection('NOAA/GOES/' + GOES_WEST_ID + '/FDCF');
 
 // VIIRS daily fire (science quality, 1km gridded)
 var viirs_vnp14 = ee.ImageCollection('NASA/VIIRS/002/VNP14A1');

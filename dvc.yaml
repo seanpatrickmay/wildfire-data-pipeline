@@ -1,0 +1,42 @@
+# NOTE: These stages use npz format. Do not change --format without
+# updating the dependency paths below.
+stages:
+  download-kincade:
+    cmd: uv run wildfire download Kincade --format npz
+    deps:
+      - src/wildfire_pipeline/gee/goes.py
+      - src/wildfire_pipeline/gee/download.py
+      - src/wildfire_pipeline/gee/retry.py
+      - config/fires.json
+    outs:
+      - data/Kincade/
+
+  download-walker:
+    cmd: uv run wildfire download Walker --format npz
+    deps:
+      - src/wildfire_pipeline/gee/goes.py
+      - src/wildfire_pipeline/gee/download.py
+      - src/wildfire_pipeline/gee/retry.py
+      - config/fires.json
+    outs:
+      - data/Walker/
+
+  process-kincade:
+    cmd: uv run wildfire process data/Kincade/Kincade_2019_FusedConf.npz --format npz
+    deps:
+      - src/wildfire_pipeline/processing/labels.py
+      - src/wildfire_pipeline/processing/io.py
+      - data/Kincade/Kincade_2019_FusedConf.npz
+      - config/fires.json
+    outs:
+      - data/Kincade/processed/
+
+  process-walker:
+    cmd: uv run wildfire process data/Walker/Walker_2019_FusedConf.npz --format npz
+    deps:
+      - src/wildfire_pipeline/processing/labels.py
+      - src/wildfire_pipeline/processing/io.py
+      - data/Walker/Walker_2019_FusedConf.npz
+      - config/fires.json
+    outs:
+      - data/Walker/processed/
