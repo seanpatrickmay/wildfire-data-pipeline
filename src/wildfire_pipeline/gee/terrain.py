@@ -33,7 +33,7 @@ ALL_STATIC_BAND_COUNT = 17  # sum of all above
 
 def get_terrain(aoi: ee.Geometry) -> ee.Image:
     """Compute terrain features from 3DEP 10m DEM."""
-    dem = ee.Image("USGS/3DEP/10m").select("elevation")
+    dem = ee.ImageCollection("USGS/3DEP/10m_collection").mosaic().select("elevation")
     slope = ee.Terrain.slope(dem).rename("slope_deg")
     aspect = ee.Terrain.aspect(dem)
     aspect_rad = aspect.multiply(math.pi / 180)
@@ -59,7 +59,8 @@ def get_terrain(aoi: ee.Geometry) -> ee.Image:
 
 def get_fuel(aoi: ee.Geometry) -> ee.Image:
     """Compute fuel/land cover features from NLCD."""
-    nlcd = ee.Image("USGS/NLCD_RELEASES/2021_REL/NLCD").select("landcover")
+    nlcd_img = ee.ImageCollection("USGS/NLCD_RELEASES/2021_REL/NLCD").first()
+    nlcd = nlcd_img.select("landcover")
     fuel_load = nlcd.remap(
         [11, 12, 21, 22, 23, 24, 31, 41, 42, 43, 51, 52, 71, 72, 73, 74, 81, 82, 90, 95],
         [
@@ -90,8 +91,11 @@ def get_fuel(aoi: ee.Geometry) -> ee.Image:
         [1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     ).rename("is_firebreak")
     canopy = (
-        ee.Image("USGS/NLCD_RELEASES/2021_REL/NLCD")
-        .select("percent_tree_canopy")
+        ee.ImageCollection("MODIS/061/MOD44B")
+        .sort("system:time_start", False)
+        .first()
+        .select("Percent_Tree_Cover")
+        .unmask(0)
         .rename("canopy_cover_pct")
     )
     result: ee.Image = fuel_load.addBands(firebreak).addBands(canopy).toFloat()
@@ -100,10 +104,28 @@ def get_fuel(aoi: ee.Geometry) -> ee.Image:
 
 def get_vegetation() -> ee.Image:
     """Get LANDFIRE vegetation type, cover, height."""
-    evt = ee.Image("LANDFIRE/Vegetation/EVT/v1_4_0").select("EVT").rename("vegetation_type")
-    evc = ee.Image("LANDFIRE/Vegetation/EVC/v1_4_0").select("EVC").rename("vegetation_cover")
-    evh = ee.Image("LANDFIRE/Vegetation/EVH/v1_4_0").select("EVH").rename("vegetation_height")
-    result: ee.Image = evt.addBands(evc).addBands(evh).toFloat()
+    # LANDFIRE ImageCollections contain images with mixed integer types
+    # (Short vs Integer<0,65535>). Cast each image to float BEFORE mosaic
+    # to avoid sampleRectangle "incompatible band" errors.
+    evt = (
+        ee.ImageCollection("LANDFIRE/Vegetation/EVT/v1_4_0")
+        .map(lambda img: img.select("EVT").toFloat())
+        .mosaic()
+        .rename("vegetation_type")
+    )
+    evc = (
+        ee.ImageCollection("LANDFIRE/Vegetation/EVC/v1_4_0")
+        .map(lambda img: img.select("EVC").toFloat())
+        .mosaic()
+        .rename("vegetation_cover")
+    )
+    evh = (
+        ee.ImageCollection("LANDFIRE/Vegetation/EVH/v1_4_0")
+        .map(lambda img: img.select("EVH").toFloat())
+        .mosaic()
+        .rename("vegetation_height")
+    )
+    result: ee.Image = evt.addBands(evc).addBands(evh)
     return result
 
 
@@ -114,58 +136,69 @@ def get_fire_history(aoi: ee.Geometry, fire_year: int) -> ee.Image:
         .filterDate("2000-01-01", f"{fire_year}-01-01")
         .filterBounds(aoi)
     )
+    # Cast to float everywhere — MTBS has mixed integer subtypes that cause
+    # sampleRectangle "incompatible band" errors when combined with other bands.
     last_burn_year = mtbs.map(
         lambda img: (
             img.select("Severity")
             .gte(2)
             .And(img.select("Severity").lte(4))
-            .multiply(ee.Date(img.get("system:time_start")).get("year"))
+            .toFloat()
+            .multiply(ee.Number(ee.Date(img.get("system:time_start")).get("year")).toFloat())
             .selfMask()
             .rename("burn_year")
         )
     ).max()
-    years_since = ee.Image(fire_year).subtract(last_burn_year).unmask(99).rename("years_since_burn")
+    years_since = (
+        ee.Image.constant(fire_year)
+        .toFloat()
+        .subtract(last_burn_year.toFloat())
+        .unmask(99)
+        .rename("years_since_burn")
+    )
     burn_count = (
         mtbs.map(
             lambda img: (
                 img.select("Severity")
                 .gte(2)
                 .And(img.select("Severity").lte(4))
+                .toFloat()
                 .selfMask()
                 .rename("burned")
             )
         )
         .count()
+        .toFloat()
         .unmask(0)
         .rename("burn_count")
     )
-    result: ee.Image = years_since.addBands(burn_count).toFloat()
-    return result
+    return years_since.toFloat().addBands(burn_count.toFloat())
 
 
 def get_roads(aoi: ee.Geometry) -> ee.Image:
     """Get road presence as firebreak indicator."""
     roads = ee.FeatureCollection("TIGER/2016/Roads").filterBounds(aoi)
-    result: ee.Image = (
-        roads.reduceToImage(properties=["linearid"], reducer=ee.Reducer.count())
-        .gt(0)
-        .unmask(0)
-        .rename("has_road")
-        .toFloat()
-    )
+    result: ee.Image = ee.Image(0).paint(roads, 1).gt(0).unmask(0).rename("has_road").toFloat()
     return result
 
 
 def get_wui(aoi: ee.Geometry) -> ee.Image:
     """Get population density and built-up surface for WUI context."""
     pop = (
-        ee.Image("JRC/GHSL/P2023A/GHS_POP")
+        ee.ImageCollection("JRC/GHSL/P2023A/GHS_POP")
+        .sort("system:time_start", False)
+        .first()
         .select("population_count")
         .unmask(0)
         .rename("population")
     )
     built = (
-        ee.Image("JRC/GHSL/P2023A/GHS_BUILT_S").select("built_surface").unmask(0).rename("built_up")
+        ee.ImageCollection("JRC/GHSL/P2023A/GHS_BUILT_S")
+        .sort("system:time_start", False)
+        .first()
+        .select("built_surface")
+        .unmask(0)
+        .rename("built_up")
     )
     result: ee.Image = pop.addBands(built).toFloat()
     return result

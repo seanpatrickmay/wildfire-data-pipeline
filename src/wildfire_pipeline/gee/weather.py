@@ -58,13 +58,15 @@ def get_hourly_soil_moisture(aoi: ee.Geometry, hour_start: ee.Date, hour_end: ee
 
 def get_drought_indices(aoi: ee.Geometry, fire_start: ee.Date) -> ee.Image:
     """Get most recent drought indices before/during fire."""
-    drought = (
+    collection = (
         ee.ImageCollection(GRIDMET_DROUGHT_DATASET)
-        .filterDate(fire_start.advance(-30, "day"), fire_start)
+        .filterDate(fire_start.advance(-60, "day"), fire_start)
         .filterBounds(aoi)
         .sort("system:time_start", False)
-        .first()
     )
+    # Use mosaic of sorted collection — gives most recent valid pixel per location.
+    # Select specific bands and rename to avoid type conflicts with string-type bands.
+    drought = collection.select(["pdsi", "eddi14d", "eddi30d"]).mosaic().unmask(0)
     pdsi = drought.select("pdsi").rename("pdsi")
     eddi14 = drought.select("eddi14d").rename("eddi_14d")
     eddi30 = drought.select("eddi30d").rename("eddi_30d")

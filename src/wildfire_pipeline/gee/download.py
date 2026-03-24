@@ -263,15 +263,31 @@ def download_features(
     from wildfire_pipeline.gee.features import get_pre_fire_ndvi
     from wildfire_pipeline.gee.weather import get_drought_indices
 
-    ndvi_img = get_pre_fire_ndvi(aoi, start)
-    drought_img = get_drought_indices(aoi, start)
-    slow_img = ndvi_img.addBands(drought_img)
-    slow_img = slow_img.reproject(crs=pipeline.export_crs, scale=pipeline.export_scale_m)
-    slow_sample = safe_sample_rectangle(slow_img, aoi)
-    slow_info = safe_get_info(slow_sample)  # ONE call gets all bands
     slow_bands: dict[str, np.ndarray] = {}
-    for band, values in slow_info["properties"].items():
-        slow_bands[band] = np.array(values, dtype=np.float32)
+    # Sample NDVI and drought separately — they may have different CRS/projections
+    # and ee.Algorithms.If fallbacks lose CRS info
+    for label, img_fn in [
+        ("ndvi", lambda: get_pre_fire_ndvi(aoi, start)),
+        ("drought", lambda: get_drought_indices(aoi, start)),
+    ]:
+        try:
+            img = img_fn().reproject(crs=pipeline.export_crs, scale=pipeline.export_scale_m)
+            sample = safe_sample_rectangle(img, aoi)
+            info = safe_get_info(sample)
+            for band, values in info["properties"].items():
+                slow_bands[band] = np.array(values, dtype=np.float32)
+        except Exception as e:
+            if isinstance(e, (TypeError, AttributeError, KeyError, ImportError)):
+                raise
+            logger.warning("slow_feature_failed", feature=label, error=str(e))
+            # Fill with zeros at expected shape
+            shape = (n_rows, n_cols)
+            if label == "ndvi":
+                slow_bands["NDVI"] = np.zeros(shape, dtype=np.float32)
+                slow_bands["EVI"] = np.zeros(shape, dtype=np.float32)
+            else:
+                for k in ["pdsi", "eddi_14d", "eddi_30d"]:
+                    slow_bands[k] = np.zeros(shape, dtype=np.float32)
 
     # --- Hourly features (RTMA + soil moisture) ---
     from wildfire_pipeline.gee.weather import get_hourly_rtma, get_hourly_soil_moisture
