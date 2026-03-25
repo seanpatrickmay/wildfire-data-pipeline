@@ -49,6 +49,48 @@
       "start_utc": "2023-08-15T14:00:00Z",
       "n_hours": 500,
       "official_acres": 95107
+    },
+    "DixieFire": {
+      "year": 2021,
+      "aoi": [-121.60, 39.82, -120.13, 40.83],
+      "start_utc": "2021-07-14T00:15:00Z",
+      "n_hours": 500,
+      "official_acres": 963309
+    },
+    "BobcatFire": {
+      "year": 2020,
+      "aoi": [-118.16, 34.12, -117.71, 34.53],
+      "start_utc": "2020-09-06T19:21:00Z",
+      "n_hours": 500,
+      "official_acres": 115796
+    },
+    "AugustComplexFire": {
+      "year": 2020,
+      "aoi": [-123.57, 39.33, -122.49, 40.49],
+      "start_utc": "2020-08-17T03:37:00Z",
+      "n_hours": 500,
+      "official_acres": 1032648
+    },
+    "CreekFire": {
+      "year": 2020,
+      "aoi": [-119.54, 36.94, -118.89, 37.68],
+      "start_utc": "2020-09-05T01:21:00Z",
+      "n_hours": 500,
+      "official_acres": 379895
+    },
+    "NorthComplexFire": {
+      "year": 2020,
+      "aoi": [-121.54, 39.47, -120.69, 40.11],
+      "start_utc": "2020-09-08T17:00:00Z",
+      "n_hours": 400,
+      "official_acres": 318935
+    },
+    "DolanFire": {
+      "year": 2020,
+      "aoi": [-121.73, 35.89, -121.20, 36.25],
+      "start_utc": "2020-08-19T03:15:00Z",
+      "n_hours": 500,
+      "official_acres": 124924
     }
   },
   "pipeline_config": {
