@@ -64,7 +64,7 @@ def get_hourly_precipitation(aoi: ee.Geometry, hour_start: ee.Date, hour_end: ee
         ee.ImageCollection(ERA5_LAND_DATASET)
         .filterDate(hour_start, hour_end)
         .filterBounds(aoi)
-        .select("total_precipitation_sum")
+        .select("total_precipitation_hourly")
     )
     result: ee.Image = era5.sum().unmask(0).rename("precipitation_m").toFloat()
     return result

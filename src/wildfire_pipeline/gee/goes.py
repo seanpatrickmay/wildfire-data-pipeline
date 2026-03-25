@@ -100,12 +100,34 @@ def get_hourly_goes(
 
     all_goes = goes16.merge(goes17).map(goes_fire_confidence)
 
+    # Guard: if no GOES images exist for this hour (coverage gap),
+    # return a zero-filled 4-band image instead of crashing on .unmask()
+    empty_img = (
+        ee.Image(0)
+        .rename("confidence")
+        .addBands(ee.Image(0).rename("frp"))
+        .addBands(ee.Image(0).rename("obs_valid"))
+        .addBands(ee.Image(0).rename("is_cloud"))
+        .toFloat()
+    )
+
+    result: ee.Image = ee.Image(
+        ee.Algorithms.If(
+            all_goes.size().gt(0),
+            _goes_reduce(all_goes),
+            empty_img,
+        )
+    )
+    return result
+
+
+def _goes_reduce(all_goes: ee.ImageCollection) -> ee.Image:
+    """Reduce a non-empty GOES collection to a single 4-band image."""
     conf = all_goes.select("fire_confidence").max().unmask(0)
     frp = all_goes.select("frp_mw").max().unmask(0)
     any_cloud = all_goes.select("is_cloud").max().unmask(0)
     any_valid = all_goes.select("is_valid").max().unmask(0)
 
-    # Cloud = cloudy AND no fire detected
     is_cloud_not_fire = any_cloud.And(conf.lte(0))
     obs_valid = any_valid.And(is_cloud_not_fire.Not())
 
