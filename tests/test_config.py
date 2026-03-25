@@ -29,7 +29,7 @@ class TestLoadRealConfig:
         kincade = config.fires["Kincade"]
         assert kincade.year == 2019
         assert kincade.aoi == (-122.96, 38.50, -122.59, 38.87)
-        assert kincade.start_utc == datetime(2019, 10, 24, tzinfo=UTC)
+        assert kincade.start_utc == datetime(2019, 10, 24, 4, 27, tzinfo=UTC)
         assert kincade.n_hours == 160
         assert kincade.official_acres == 77758
 
