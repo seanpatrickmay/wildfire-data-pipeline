@@ -50,14 +50,16 @@ class TestProcessFireHappyPath:
         expected_keys = {
             "labels",
             "soft_labels",
+            "fire_change",
             "validity",
+            "prev_fire_state",
+            "prev_distance_to_fire",
+            "prev_fire_neighborhood",
             "loss_weights",
             "_diag_raw_confidence",
             "_diag_capped_frp",
             "_diag_frp_reliability",
             "_diag_was_imputed",
-            "_lagged_distance_to_fire",
-            "_lagged_fire_neighborhood",
         }
         assert set(out_arrays.keys()) == expected_keys
 
@@ -752,3 +754,49 @@ class TestMissingInputArrays:
         assert "validity" in out_arrays
         assert "loss_weights" in out_arrays
         assert out_arrays["labels"].shape == (T, H, W)
+
+
+# ---------------------------------------------------------------------------
+# Previous fire state and derived features
+# ---------------------------------------------------------------------------
+
+
+class TestPrevFireState:
+    """Verify prev_fire_state is correctly time-shifted."""
+
+    def test_prev_fire_state_is_shifted_labels(
+        self, tmp_path, sample_fire_arrays, sample_metadata, pipeline_config
+    ):
+        out_arrays, _ = _save_and_process(
+            tmp_path, sample_fire_arrays, sample_metadata, pipeline_config
+        )
+        labels = out_arrays["labels"]
+        prev = out_arrays["prev_fire_state"]
+        # prev[0] should be all zeros (no history)
+        assert prev[0].sum() == 0.0
+        # prev[t] should equal labels[t-1] for t > 0
+        if labels.shape[0] > 1:
+            np.testing.assert_array_equal(prev[1:], labels[:-1])
+
+    def test_fire_change_is_new_ignitions(
+        self, tmp_path, sample_fire_arrays, sample_metadata, pipeline_config
+    ):
+        out_arrays, _ = _save_and_process(
+            tmp_path, sample_fire_arrays, sample_metadata, pipeline_config
+        )
+        labels = out_arrays["labels"]
+        prev = out_arrays["prev_fire_state"]
+        change = out_arrays["fire_change"]
+        # fire_change should be 1 only where labels=1 AND prev=0
+        expected = ((labels == 1) & (prev == 0)).astype(np.float32)
+        np.testing.assert_array_equal(change, expected)
+
+    def test_prev_spatial_features_use_previous_labels(
+        self, tmp_path, sample_fire_arrays, sample_metadata, pipeline_config
+    ):
+        out_arrays, _ = _save_and_process(
+            tmp_path, sample_fire_arrays, sample_metadata, pipeline_config
+        )
+        prev_dist = out_arrays["prev_distance_to_fire"]
+        # At t=0, prev_fire_state is all zeros, so distance should be -1 (sentinel)
+        assert (prev_dist[0] == -1.0).all()

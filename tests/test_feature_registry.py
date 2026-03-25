@@ -54,10 +54,22 @@ class TestFeatureRegistry:
         assert "ugrd" in safe
         assert "slope_deg" in safe
 
-    def test_lagged_features_identified(self) -> None:
+    def test_prev_fire_features_safe_as_input(self) -> None:
+        safe = get_safe_input_features()
+        assert "prev_fire_state" in safe
+        assert "prev_distance_to_fire" in safe
+        assert "prev_fire_neighborhood" in safe
+
+    def test_prev_fire_features_no_temporal_lag_required(self) -> None:
         from wildfire_pipeline.feature_registry import get_lagged_features
 
         lagged = get_lagged_features()
-        assert "_lagged_distance_to_fire" in lagged
-        assert "_lagged_fire_neighborhood" in lagged
+        # prev_* features are pre-shifted, so they do NOT require temporal lag
+        assert "prev_fire_state" not in lagged
+        assert "prev_distance_to_fire" not in lagged
+        assert "prev_fire_neighborhood" not in lagged
         assert "erc" not in lagged
+
+    def test_fire_change_not_safe_as_input(self) -> None:
+        safe = get_safe_input_features()
+        assert "fire_change" not in safe

@@ -181,9 +181,21 @@ FEATURE_REGISTRY: dict[str, FeatureSpec] = {
     "built_up": FeatureSpec(
         "built_up", "m2", "JRC/GHSL", "static", 0.0, 10000.0, "continuous", "zscore"
     ),
-    # --- Derived spatial (from labels, safe ONLY at t-1) ---
-    "_lagged_distance_to_fire": FeatureSpec(
-        "_lagged_distance_to_fire",
+    # --- Previous fire state (pre-shifted, safe as input at time t) ---
+    "prev_fire_state": FeatureSpec(
+        "prev_fire_state",
+        "binary",
+        "pipeline",
+        "hourly",
+        0.0,
+        1.0,
+        "binary",
+        "none",
+        safe_as_input=True,
+        requires_temporal_lag=False,
+    ),
+    "prev_distance_to_fire": FeatureSpec(
+        "prev_distance_to_fire",
         "pixels",
         "derived",
         "hourly",
@@ -192,10 +204,10 @@ FEATURE_REGISTRY: dict[str, FeatureSpec] = {
         "continuous",
         "zscore",
         safe_as_input=True,
-        requires_temporal_lag=True,
+        requires_temporal_lag=False,
     ),
-    "_lagged_fire_neighborhood": FeatureSpec(
-        "_lagged_fire_neighborhood",
+    "prev_fire_neighborhood": FeatureSpec(
+        "prev_fire_neighborhood",
         "fraction",
         "derived",
         "hourly",
@@ -204,7 +216,7 @@ FEATURE_REGISTRY: dict[str, FeatureSpec] = {
         "continuous",
         "none",
         safe_as_input=True,
-        requires_temporal_lag=True,
+        requires_temporal_lag=False,
     ),
     # --- Targets (NOT safe as model input) ---
     "labels": FeatureSpec(
@@ -218,6 +230,17 @@ FEATURE_REGISTRY: dict[str, FeatureSpec] = {
         0.0,
         1.0,
         "continuous",
+        "none",
+        safe_as_input=False,
+    ),
+    "fire_change": FeatureSpec(
+        "fire_change",
+        "binary",
+        "pipeline",
+        "hourly",
+        0.0,
+        1.0,
+        "binary",
         "none",
         safe_as_input=False,
     ),

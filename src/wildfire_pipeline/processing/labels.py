@@ -279,9 +279,20 @@ def process_fire(
         **frp_stats,
     )
 
-    # Derived spatial features (for model input, not labels)
-    distance_to_fire = compute_distance_to_fire(smoothed)
-    fire_neighborhood = compute_fire_neighborhood(smoothed, kernel_size=5)
+    # Previous fire state: labels shifted forward by 1 timestep.
+    # prev_fire_state[t] = labels[t-1] (what the model sees as input at time t).
+    # prev_fire_state[0] = all zeros (no fire history at the start).
+    prev_fire_state = np.zeros_like(smoothed)
+    if T > 1:
+        prev_fire_state[1:] = smoothed[:-1]
+
+    # Fire state change: pixels that become fire between t-1 and t.
+    # fire_change[t] = 1 where labels[t]==1 AND prev_fire_state[t]==0 (new ignition)
+    fire_change = ((smoothed == 1) & (prev_fire_state == 0)).astype(np.float32)
+
+    # Previous-timestep spatial features (safe as input — derived from labels[t-1])
+    prev_distance_to_fire = compute_distance_to_fire(prev_fire_state)
+    prev_fire_neighborhood = compute_fire_neighborhood(prev_fire_state, kernel_size=5)
 
     # Class balance for training loss weighting
     valid_mask = validity > 0
@@ -293,18 +304,19 @@ def process_fire(
         # === TARGETS (what the model predicts) ===
         "labels": smoothed,
         "soft_labels": soft_labels,
-        # === INPUT-SAFE (can be used as model features) ===
+        "fire_change": fire_change,
+        # === INPUT-SAFE (can be used as model features at time t) ===
         "validity": validity,
+        "prev_fire_state": prev_fire_state,
+        "prev_distance_to_fire": prev_distance_to_fire,
+        "prev_fire_neighborhood": prev_fire_neighborhood,
         # === LOSS WEIGHTS (for training loss only, NOT model input) ===
         "loss_weights": quality_weights,
-        # === DIAGNOSTICS (for analysis only, NOT model input or targets) ===
+        # === DIAGNOSTICS (for analysis only, NOT model input) ===
         "_diag_raw_confidence": conf,
         "_diag_capped_frp": capped_frp,
         "_diag_frp_reliability": frp_reliability,
         "_diag_was_imputed": was_imputed,
-        # === LAGGED FEATURES (safe ONLY at t-1, NOT at t) ===
-        "_lagged_distance_to_fire": distance_to_fire,
-        "_lagged_fire_neighborhood": fire_neighborhood,
     }
     out_metadata: dict[str, Any] = {
         **input_metadata,
@@ -338,24 +350,30 @@ def process_fire(
             **frp_stats,
         },
         "usage_guide": {
-            "safe_input_features": [
-                "Use arrays from the *_Features.npz file (weather, terrain, etc.)",
-                "validity is safe as an input feature",
-                "Arrays prefixed with _lagged_ are safe ONLY at t-1 to predict t",
+            "model_input": [
+                "Use arrays from *_Features.npz (weather, terrain, temporal encoding)",
+                "From *_processed.npz: validity, prev_fire_state, prev_distance_to_fire, prev_fire_neighborhood",
+                "prev_fire_state[t] = labels[t-1] — the model sees where fire WAS, not where it IS",
+                "NEVER use labels, soft_labels, fire_change, loss_weights, or _diag_* as input",
             ],
-            "targets": ["labels (binary)", "soft_labels (continuous)"],
+            "targets": [
+                "labels — binary fire state at time t",
+                "soft_labels — continuous confidence at time t",
+                "fire_change — new ignitions only (labels[t] AND NOT prev_fire_state[t])",
+            ],
             "loss_weights_only": ["loss_weights — do NOT use as model input"],
             "diagnostics_only": [
-                "_diag_* arrays are for analysis, NOT model input",
-                "_diag_raw_confidence IS the label before thresholding",
-                "_diag_capped_frp nonzero implies fire detection",
+                "_diag_* arrays are for post-hoc analysis, NOT model input",
+            ],
+            "evaluation": [
+                "oracle_f1_smoothed is inflated by temporal smoothing — compare with oracle_f1_raw",
+                "Metrics exclude cloud-obscured pixels — real-world performance is lower",
+                "Use leave-one-fire-out evaluation, not within-fire temporal splits",
             ],
             "limitations": [
                 "All fires are major California incidents (54k-222k acres)",
                 "No small/suppressed fires — model will have fire-growth bias",
-                "oracle_f1_smoothed is inflated by temporal smoothing — compare with oracle_f1_raw",
-                "Metrics exclude cloud-obscured pixels (the hardest prediction cases)",
-                "Evaluation should use leave-one-fire-out, not within-fire temporal splits",
+                "7 fires across 2018-2023, all Northern/Central California",
             ],
         },
     }
