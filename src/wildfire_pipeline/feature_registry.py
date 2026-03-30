@@ -30,6 +30,12 @@ FEATURE_REGISTRY: dict[str, FeatureSpec] = {
         "confidence", "probability", "GOES FDCC/FDCF", "hourly", 0.0, 1.0, "continuous", "none"
     ),
     "frp": FeatureSpec("frp", "MW", "GOES ABI", "hourly", 0.0, 5000.0, "continuous", "zscore"),
+    "fire_area_km2": FeatureSpec(
+        "fire_area_km2", "km2", "GOES FDCC/FDCF", "hourly", 0.0, 4.0, "continuous", "zscore"
+    ),
+    "fire_temp_k": FeatureSpec(
+        "fire_temp_k", "K", "GOES FDCC/FDCF", "hourly", 400.0, 2000.0, "continuous", "zscore"
+    ),
     # --- RTMA weather (hourly) ---
     "ugrd": FeatureSpec(
         "ugrd", "m/s", "NOAA/NWS/RTMA", "hourly", -50.0, 50.0, "continuous", "zscore"
@@ -115,6 +121,40 @@ FEATURE_REGISTRY: dict[str, FeatureSpec] = {
         "slow",
         -5.0,
         15.0,
+        "continuous",
+        "zscore",
+    ),
+    "ndwi": FeatureSpec(
+        "ndwi", "index", "MODIS/061/MOD09GA", "slow", -1.0, 1.0, "continuous", "minmax"
+    ),
+    # --- Smoke/cloud discrimination (hourly, from GOES ABI BTD) ---
+    "is_smoke": FeatureSpec(
+        "is_smoke",
+        "binary",
+        "GOES ABI MCMIPC",
+        "hourly",
+        0.0,
+        1.0,
+        "binary",
+        "none",
+    ),
+    "btd_fire_smoke": FeatureSpec(
+        "btd_fire_smoke",
+        "K",
+        "GOES ABI MCMIPC",
+        "hourly",
+        -50.0,
+        100.0,
+        "continuous",
+        "zscore",
+    ),
+    "blue_swir_smoke_ratio": FeatureSpec(
+        "blue_swir_smoke_ratio",
+        "ratio",
+        "GOES ABI MCMIPC",
+        "hourly",
+        0.0,
+        20.0,
         "continuous",
         "zscore",
     ),

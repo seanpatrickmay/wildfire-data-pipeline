@@ -73,3 +73,50 @@ class TestFeatureRegistry:
     def test_fire_change_not_safe_as_input(self) -> None:
         safe = get_safe_input_features()
         assert "fire_change" not in safe
+
+    def test_smoke_features_registered(self) -> None:
+        assert "is_smoke" in FEATURE_REGISTRY
+        assert "btd_fire_smoke" in FEATURE_REGISTRY
+
+    def test_smoke_features_are_hourly(self) -> None:
+        assert FEATURE_REGISTRY["is_smoke"].temporal == "hourly"
+        assert FEATURE_REGISTRY["btd_fire_smoke"].temporal == "hourly"
+
+    def test_smoke_features_safe_as_input(self) -> None:
+        safe = get_safe_input_features()
+        assert "is_smoke" in safe
+        assert "btd_fire_smoke" in safe
+
+    def test_btd_fire_smoke_is_continuous(self) -> None:
+        spec = FEATURE_REGISTRY["btd_fire_smoke"]
+        assert spec.dtype_hint == "continuous"
+        assert spec.unit == "K"
+        assert spec.normalization == "zscore"
+
+    def test_is_smoke_is_binary(self) -> None:
+        spec = FEATURE_REGISTRY["is_smoke"]
+        assert spec.dtype_hint == "binary"
+        assert spec.normalization == "none"
+
+    def test_fire_area_temp_registered(self) -> None:
+        assert "fire_area_km2" in FEATURE_REGISTRY
+        assert "fire_temp_k" in FEATURE_REGISTRY
+        assert FEATURE_REGISTRY["fire_area_km2"].unit == "km2"
+        assert FEATURE_REGISTRY["fire_temp_k"].unit == "K"
+
+    def test_ndwi_registered(self) -> None:
+        spec = FEATURE_REGISTRY["ndwi"]
+        assert spec.source == "MODIS/061/MOD09GA"
+        assert spec.temporal == "slow"
+        assert spec.range_min == -1.0
+        assert spec.range_max == 1.0
+
+    def test_blue_swir_smoke_ratio_registered(self) -> None:
+        spec = FEATURE_REGISTRY["blue_swir_smoke_ratio"]
+        assert spec.unit == "ratio"
+        assert spec.temporal == "hourly"
+
+    def test_new_features_safe_as_input(self) -> None:
+        safe = get_safe_input_features()
+        for name in ["fire_area_km2", "fire_temp_k", "ndwi", "blue_swir_smoke_ratio"]:
+            assert name in safe, f"{name} should be safe as model input"

@@ -116,9 +116,21 @@ def process_fire(
     cloud = arrays.get("cloud_mask", np.zeros_like(conf)).astype(np.float32)
     frp = arrays.get("frp", np.zeros_like(conf)).astype(np.float32)
 
+    # Check for smoke data BEFORE creating fallback arrays
+    has_smoke_data = "is_smoke" in arrays
+    is_smoke = arrays.get("is_smoke", np.zeros_like(conf)).astype(np.float32)
+    btd_fire_smoke = arrays.get("btd_fire_smoke", np.zeros_like(conf)).astype(np.float32)
+
     T, H, W = conf.shape
     fire_name = input_metadata.get("fire_name", fire_path.stem)
-    logger.info("processing_fire", fire_name=fire_name, hours=T, height=H, width=W)
+    logger.info(
+        "processing_fire",
+        fire_name=fire_name,
+        hours=T,
+        height=H,
+        width=W,
+        smoke_data_available=has_smoke_data,
+    )
 
     # Step 1: Apply confidence threshold
     threshold = cfg.goes_confidence_threshold
@@ -213,6 +225,8 @@ def process_fire(
         was_imputed=was_imputed,
         frp_reliability=frp_reliability,
         imputation_weight=cfg.imputation_weight,
+        is_smoke=is_smoke if has_smoke_data else None,
+        smoke_weight=cfg.smoke_training_weight,
     )
 
     # Step 7: Compute quality metrics (vectorized — no Python loops)
@@ -310,6 +324,8 @@ def process_fire(
         "prev_fire_state": prev_fire_state,
         "prev_distance_to_fire": prev_distance_to_fire,
         "prev_fire_neighborhood": prev_fire_neighborhood,
+        "is_smoke": is_smoke,
+        "btd_fire_smoke": btd_fire_smoke,
         # === LOSS WEIGHTS (for training loss only, NOT model input) ===
         "loss_weights": quality_weights,
         # === DIAGNOSTICS (for analysis only, NOT model input) ===
@@ -330,6 +346,8 @@ def process_fire(
             "isolated_pixel_filtering": True,
             "frp_outlier_detection": True,
             "imputation_weight": cfg.imputation_weight,
+            "smoke_discrimination": has_smoke_data,
+            "smoke_training_weight": cfg.smoke_training_weight,
         },
         "quality": {
             "raw_fire_pixels": n_fire_raw,
@@ -342,6 +360,8 @@ def process_fire(
             "oracle_precision": oracle_p,
             "oracle_recall": oracle_r,
             "cloud_excluded_fraction": float(1.0 - validity.mean()),
+            "smoke_pixels": int(is_smoke.sum()) if has_smoke_data else 0,
+            "smoke_fraction": float(is_smoke.mean()) if has_smoke_data else 0.0,
             "max_gap_hours": gap_stats["max_gap_overall"],
             "mean_gap_length": gap_stats["mean_gap_length"],
             "gap_fraction": gap_stats["gap_fraction"],

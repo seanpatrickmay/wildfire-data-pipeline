@@ -202,6 +202,8 @@ def compute_quality_weights(
     was_imputed: np.ndarray | None = None,
     frp_reliability: np.ndarray | None = None,
     imputation_weight: float = 0.3,
+    is_smoke: np.ndarray | None = None,
+    smoke_weight: float = 0.6,
 ) -> np.ndarray:
     """Compute per-pixel training loss weights based on data quality.
 
@@ -209,20 +211,33 @@ def compute_quality_weights(
         loss = sum(weight * pixel_loss) / sum(weight)
 
     Weight levels:
-    - 1.0: high-quality observed data (valid, not imputed)
+    - 1.0: high-quality observed data (valid, not imputed, clear sky)
+    - smoke_weight: pixel reclassified as smoke (semi-transparent, fire likely visible)
     - imputation_weight: data was forward-filled through a cloud gap
     - 0.0: missing/invalid data (excluded from loss)
+
+    Smoke pixels get an intermediate weight because the surface is partially
+    visible through smoke aerosol, but the observation quality is degraded
+    compared to clear-sky conditions.
 
     Args:
         validity: (T, H, W) validity mask (1=valid, 0=invalid)
         was_imputed: optional (T, H, W) imputation mask from cloud_aware_persistence
         frp_reliability: optional (T, H, W) reliability from detect_frp_outliers
         imputation_weight: weight for imputed pixels (default 0.3)
+        is_smoke: optional (T, H, W) smoke mask from BTD discrimination
+        smoke_weight: weight for smoke-reclassified pixels (default 0.6)
 
     Returns:
         (T, H, W) weight array in [0, 1]
     """
     weights = validity.copy().astype(np.float32)
+
+    # Smoke pixels: reclassified from cloud, get intermediate weight.
+    # Applied BEFORE imputation so that smoke pixels that were also
+    # imputed get the lower of the two weights.
+    if is_smoke is not None:
+        weights = np.where((is_smoke > 0) & (weights > 0), smoke_weight, weights)
 
     # Imputed pixels should get imputation_weight even though validity=0
     # (they were forward-filled through cloud gaps — we have some confidence)
@@ -301,7 +316,80 @@ def compute_gap_stats(validity: np.ndarray) -> dict[str, np.ndarray | float]:
 
 
 # ---------------------------------------------------------------------------
-# 6. Normalization statistics for ML training
+# 6. Grid alignment for mismatched feature arrays
+# ---------------------------------------------------------------------------
+
+
+def align_feature_grids(
+    feature_arrays: dict[str, np.ndarray],
+    target_shape: tuple[int, int],
+) -> tuple[dict[str, np.ndarray], list[str]]:
+    """Resample feature arrays whose spatial dimensions don't match the target grid.
+
+    Uses bilinear interpolation (order=1) for continuous features and
+    nearest-neighbor (order=0) for binary/categorical features.
+
+    Args:
+        feature_arrays: dict of named arrays, each (T, H, W) or (H, W)
+        target_shape: (H_target, W_target) spatial dimensions to match
+
+    Returns:
+        Tuple of (aligned arrays dict, list of array names that were resampled)
+    """
+    from scipy.ndimage import zoom
+
+    aligned: dict[str, np.ndarray] = {}
+    resampled: list[str] = []
+    target_h, target_w = target_shape
+
+    for name, arr in feature_arrays.items():
+        if arr.ndim == 3:
+            _, h, w = arr.shape
+        elif arr.ndim == 2:
+            h, w = arr.shape
+        else:
+            aligned[name] = arr
+            continue
+
+        if (h, w) == (target_h, target_w):
+            aligned[name] = arr
+            continue
+
+        # Determine interpolation order: nearest for binary/categorical, bilinear for continuous
+        unique_vals = np.unique(arr)
+        is_binary = len(unique_vals) <= 3 and set(unique_vals).issubset({0.0, 1.0, -1.0})
+        order = 0 if is_binary else 1
+
+        if arr.ndim == 3:
+            T = arr.shape[0]
+            zoom_factors = (1.0, target_h / h, target_w / w)
+            resampled_arr = zoom(arr.astype(np.float64), zoom_factors, order=order)
+            # zoom can produce shape off by 1 due to rounding — force exact shape
+            resampled_arr = resampled_arr[:T, :target_h, :target_w]
+            if resampled_arr.shape != (T, target_h, target_w):
+                # Pad if zoom produced too few pixels
+                padded = np.zeros((T, target_h, target_w), dtype=np.float64)
+                sh, sw = min(resampled_arr.shape[1], target_h), min(resampled_arr.shape[2], target_w)
+                padded[:, :sh, :sw] = resampled_arr[:, :sh, :sw]
+                resampled_arr = padded
+        else:
+            zoom_factors = (target_h / h, target_w / w)
+            resampled_arr = zoom(arr.astype(np.float64), zoom_factors, order=order)
+            resampled_arr = resampled_arr[:target_h, :target_w]
+            if resampled_arr.shape != (target_h, target_w):
+                padded = np.zeros((target_h, target_w), dtype=np.float64)
+                sh, sw = min(resampled_arr.shape[0], target_h), min(resampled_arr.shape[1], target_w)
+                padded[:sh, :sw] = resampled_arr[:sh, :sw]
+                resampled_arr = padded
+
+        aligned[name] = resampled_arr.astype(np.float32)
+        resampled.append(name)
+
+    return aligned, resampled
+
+
+# ---------------------------------------------------------------------------
+# 7. Normalization statistics for ML training
 # ---------------------------------------------------------------------------
 
 

@@ -10,6 +10,7 @@ from wildfire_pipeline.processing.quality import (
     FRP_DETECTION_FLOOR_MW,
     FRP_PRACTICAL_CEILING_MW,
     FRP_SATURATION_MW,
+    align_feature_grids,
     cloud_aware_persistence,
     compute_gap_stats,
     compute_quality_weights,
@@ -536,6 +537,77 @@ class TestComputeQualityWeights:
         # Pixel 2: invalid -> 0.0
         assert weights[0, 0, 2] == pytest.approx(0.0)
 
+    def test_smoke_pixels_get_smoke_weight(self) -> None:
+        """Smoke-reclassified pixels get intermediate weight."""
+        T, H, W = 5, 2, 2
+        validity = np.ones((T, H, W), dtype=np.float32)
+        is_smoke = np.zeros((T, H, W), dtype=np.float32)
+        is_smoke[0, 0, 0] = 1.0
+
+        weights = compute_quality_weights(validity, is_smoke=is_smoke)
+
+        assert weights[0, 0, 0] == pytest.approx(0.6)  # default smoke_weight
+        assert weights[1, 0, 0] == pytest.approx(1.0)  # non-smoke valid pixel
+
+    def test_smoke_weight_customizable(self) -> None:
+        """Custom smoke_weight should be respected."""
+        T, H, W = 3, 2, 2
+        validity = np.ones((T, H, W), dtype=np.float32)
+        is_smoke = np.zeros((T, H, W), dtype=np.float32)
+        is_smoke[0, 0, 0] = 1.0
+
+        weights = compute_quality_weights(validity, is_smoke=is_smoke, smoke_weight=0.8)
+
+        assert weights[0, 0, 0] == pytest.approx(0.8)
+
+    def test_smoke_pixels_invalid_get_zero(self) -> None:
+        """Smoke pixels that are also invalid (validity=0) should stay at 0."""
+        T, H, W = 3, 2, 2
+        validity = np.zeros((T, H, W), dtype=np.float32)
+        is_smoke = np.zeros((T, H, W), dtype=np.float32)
+        is_smoke[0, 0, 0] = 1.0  # smoke but invalid
+
+        weights = compute_quality_weights(validity, is_smoke=is_smoke)
+
+        # Smoke weight only applies where validity > 0
+        assert weights[0, 0, 0] == pytest.approx(0.0)
+
+    def test_imputed_beats_smoke_weight(self) -> None:
+        """Imputed pixels get imputation_weight even if also smoke."""
+        T, H, W = 3, 2, 2
+        validity = np.ones((T, H, W), dtype=np.float32)
+        is_smoke = np.zeros((T, H, W), dtype=np.float32)
+        is_smoke[0, 0, 0] = 1.0
+        was_imputed = np.zeros((T, H, W), dtype=np.float32)
+        was_imputed[0, 0, 0] = 1.0  # both smoke AND imputed
+
+        weights = compute_quality_weights(
+            validity, was_imputed=was_imputed, is_smoke=is_smoke
+        )
+
+        # Imputation is applied after smoke, so imputed overrides smoke
+        assert weights[0, 0, 0] == pytest.approx(0.3)
+
+    def test_full_weight_hierarchy(self) -> None:
+        """Test the complete weight hierarchy: valid > smoke > imputed > invalid."""
+        T, H, W = 1, 1, 4
+        validity = np.array([[[1.0, 1.0, 0.0, 0.0]]], dtype=np.float32)
+        is_smoke = np.array([[[0.0, 1.0, 0.0, 0.0]]], dtype=np.float32)
+        was_imputed = np.array([[[0.0, 0.0, 1.0, 0.0]]], dtype=np.float32)
+
+        weights = compute_quality_weights(
+            validity, was_imputed=was_imputed, is_smoke=is_smoke
+        )
+
+        # Pixel 0: valid, clear -> 1.0
+        assert weights[0, 0, 0] == pytest.approx(1.0)
+        # Pixel 1: valid, smoke -> 0.6
+        assert weights[0, 0, 1] == pytest.approx(0.6)
+        # Pixel 2: invalid, imputed -> 0.3
+        assert weights[0, 0, 2] == pytest.approx(0.3)
+        # Pixel 3: invalid, no imputation -> 0.0
+        assert weights[0, 0, 3] == pytest.approx(0.0)
+
 
 # ---------------------------------------------------------------------------
 # compute_gap_stats
@@ -635,3 +707,90 @@ class TestComputeGapStats:
         assert elapsed < 2.0, f"compute_gap_stats took {elapsed:.2f}s on {T}x{H}x{W} array"
         assert stats["gap_fraction"] > 0
         assert stats["max_gap_overall"] > 0
+
+
+# ---------------------------------------------------------------------------
+# align_feature_grids
+# ---------------------------------------------------------------------------
+
+
+class TestAlignFeatureGrids:
+    """Tests for spatial grid alignment of mismatched feature arrays."""
+
+    def test_matching_grids_unchanged(self) -> None:
+        """Arrays that already match the target shape are returned as-is."""
+        arrays = {
+            "hourly_tmp": np.ones((10, 20, 20), dtype=np.float32),
+            "static_elev": np.ones((20, 20), dtype=np.float32),
+        }
+        aligned, resampled = align_feature_grids(arrays, (20, 20))
+
+        assert resampled == []
+        np.testing.assert_array_equal(aligned["hourly_tmp"], arrays["hourly_tmp"])
+
+    def test_mismatched_3d_resampled(self) -> None:
+        """A 3D array with wrong spatial dims is resampled to target."""
+        arr = np.ones((10, 15, 12), dtype=np.float32)
+        arrays = {"hourly_tmp": arr}
+
+        aligned, resampled = align_feature_grids(arrays, (20, 20))
+
+        assert "hourly_tmp" in resampled
+        assert aligned["hourly_tmp"].shape == (10, 20, 20)
+
+    def test_mismatched_2d_resampled(self) -> None:
+        """A 2D array with wrong spatial dims is resampled."""
+        arr = np.ones((15, 12), dtype=np.float32)
+        arrays = {"static_elev": arr}
+
+        aligned, resampled = align_feature_grids(arrays, (20, 20))
+
+        assert "static_elev" in resampled
+        assert aligned["static_elev"].shape == (20, 20)
+
+    def test_binary_uses_nearest_neighbor(self) -> None:
+        """Binary arrays should use nearest-neighbor (order=0) interpolation."""
+        arr = np.zeros((5, 10, 10), dtype=np.float32)
+        arr[:, :5, :5] = 1.0  # top-left quadrant is fire
+        arrays = {"is_fire": arr}
+
+        aligned, resampled = align_feature_grids(arrays, (20, 20))
+
+        # After nearest-neighbor upsampling, values should still be 0 or 1
+        unique = np.unique(aligned["is_fire"])
+        assert set(unique).issubset({0.0, 1.0})
+
+    def test_continuous_preserves_values(self) -> None:
+        """Continuous arrays should have values in a reasonable range after resampling."""
+        rng = np.random.default_rng(42)
+        arr = rng.uniform(200, 300, size=(5, 10, 10)).astype(np.float32)
+        arrays = {"hourly_tmp": arr}
+
+        aligned, _ = align_feature_grids(arrays, (20, 20))
+
+        # Values should be within the original range (bilinear interpolation)
+        assert aligned["hourly_tmp"].min() >= 199.0
+        assert aligned["hourly_tmp"].max() <= 301.0
+
+    def test_mixed_match_and_mismatch(self) -> None:
+        """Only mismatched arrays are resampled; matching ones are untouched."""
+        arrays = {
+            "ok": np.ones((10, 20, 20), dtype=np.float32),
+            "bad": np.ones((10, 15, 12), dtype=np.float32),
+        }
+
+        aligned, resampled = align_feature_grids(arrays, (20, 20))
+
+        assert resampled == ["bad"]
+        assert aligned["ok"].shape == (10, 20, 20)
+        assert aligned["bad"].shape == (10, 20, 20)
+
+    def test_off_by_one_pixel(self) -> None:
+        """Common case: grid is off by 1 pixel in one dimension."""
+        arr = np.ones((10, 20, 19), dtype=np.float32)  # W is 19 instead of 20
+        arrays = {"hourly_ugrd": arr}
+
+        aligned, resampled = align_feature_grids(arrays, (20, 20))
+
+        assert aligned["hourly_ugrd"].shape == (10, 20, 20)
+        assert "hourly_ugrd" in resampled

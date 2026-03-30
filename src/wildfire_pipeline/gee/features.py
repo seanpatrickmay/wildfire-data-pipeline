@@ -1,7 +1,8 @@
-"""Slow-varying feature extraction: NDVI/EVI, Land Surface Temperature, and Smoke.
+"""Slow-varying feature extraction: NDVI/EVI, NDWI, Land Surface Temperature, and Smoke.
 
 Sources:
 - MODIS MOD13Q1: 250m, 16-day NDVI and EVI composites
+- MODIS MOD09GA: 500m, daily surface reflectance (NDWI fuel moisture)
 - MODIS MOD11A1: 1km, daily Land Surface Temperature (day + night)
 - TROPOMI S5P (COPERNICUS/S5P/OFFL/L3_AER_AI): UV Aerosol Index (smoke through clouds)
 """
@@ -12,6 +13,9 @@ import ee
 
 NDVI_DATASET = "MODIS/061/MOD13Q1"
 NDVI_BANDS = ["NDVI", "EVI"]
+
+NDWI_DATASET = "MODIS/061/MOD09GA"
+NDWI_BANDS = ["sur_refl_b02", "sur_refl_b06"]  # NIR ~0.86μm, SWIR ~1.64μm
 
 LST_DATASET = "MODIS/061/MOD11A1"
 
@@ -31,6 +35,24 @@ def get_pre_fire_ndvi(aoi: ee.Geometry, fire_start: ee.Date) -> ee.Image:
     # If empty, .mosaic() returns an image with all masked pixels, and unmask(0) fills.
     # MODIS NDVI has scale factor 0.0001
     result: ee.Image = collection.mosaic().multiply(0.0001).unmask(0).toFloat()
+    return result
+
+
+def get_pre_fire_ndwi(aoi: ee.Geometry, fire_start: ee.Date) -> ee.Image:
+    """Get pre-fire NDWI (Normalized Difference Water Index) for fuel moisture."""
+    collection = (
+        ee.ImageCollection(NDWI_DATASET)
+        .filterDate(fire_start.advance(-32, "day"), fire_start)
+        .filterBounds(aoi)
+        .select(NDWI_BANDS)
+        .sort("system:time_start", False)
+    )
+    # Apply scale factor 0.0001 to surface reflectance bands
+    scaled = collection.mosaic().multiply(0.0001)
+    # NDWI = (NIR - SWIR) / (NIR + SWIR)
+    result: ee.Image = (
+        scaled.normalizedDifference(NDWI_BANDS).unmask(0).rename("ndwi").toFloat()
+    )
     return result
 
 

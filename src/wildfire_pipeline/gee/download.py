@@ -119,17 +119,27 @@ def download_fire_stack(
     logger.debug("expected_grid_shape", rows=n_rows, cols=n_cols)
 
     # Download each hour
+    use_smoke = pipeline.smoke_discrimination
     all_conf: list[np.ndarray] = []
     all_valid: list[np.ndarray] = []
     all_cloud: list[np.ndarray] = []
     all_frp: list[np.ndarray] = []
+    all_fire_area: list[np.ndarray] = []
+    all_fire_temp: list[np.ndarray] = []
+    all_smoke: list[np.ndarray] = []
+    all_btd: list[np.ndarray] = []
+    all_blue_swir: list[np.ndarray] = []
     failed_hours: list[int] = []
 
     for h in range(n_hours):
         hour_start = start.advance(h, "hour")
         hour_end = start.advance(h + 1, "hour")
 
-        hourly = get_hourly_goes(aoi, hour_start, hour_end, fire_year=fire.year)
+        hourly = get_hourly_goes(
+            aoi, hour_start, hour_end,
+            fire_year=fire.year,
+            smoke_discrimination=use_smoke,
+        )
         hourly = hourly.reproject(crs=pipeline.export_crs, scale=pipeline.export_scale_m)
 
         try:
@@ -145,6 +155,13 @@ def download_fire_stack(
             all_valid.append(valid_arr)
             all_cloud.append(cloud_arr)
             all_frp.append(frp_arr)
+            all_fire_area.append(np.array(props["fire_area"], dtype=np.float32))
+            all_fire_temp.append(np.array(props["fire_temp"], dtype=np.float32))
+
+            if use_smoke:
+                all_smoke.append(np.array(props["is_smoke"], dtype=np.float32))
+                all_btd.append(np.array(props["btd_fire_smoke"], dtype=np.float32))
+                all_blue_swir.append(np.array(props["blue_swir_smoke_ratio"], dtype=np.float32))
 
         except Exception as e:
             # Re-raise programming errors immediately; only handle GEE/network failures
@@ -157,6 +174,12 @@ def download_fire_stack(
             all_valid.append(np.zeros(shape, dtype=np.float32))
             all_cloud.append(np.zeros(shape, dtype=np.float32))
             all_frp.append(np.zeros(shape, dtype=np.float32))
+            all_fire_area.append(np.zeros(shape, dtype=np.float32))
+            all_fire_temp.append(np.zeros(shape, dtype=np.float32))
+            if use_smoke:
+                all_smoke.append(np.zeros(shape, dtype=np.float32))
+                all_btd.append(np.zeros(shape, dtype=np.float32))
+                all_blue_swir.append(np.zeros(shape, dtype=np.float32))
             continue
 
         step = max(1, min(24, n_hours // 10))
@@ -191,7 +214,25 @@ def download_fire_stack(
         "observation_valid": valid_stack,
         "cloud_mask": cloud_stack,
         "frp": frp_stack,
+        "fire_area": np.stack(all_fire_area, axis=0),
+        "fire_temp": np.stack(all_fire_temp, axis=0),
     }
+
+    if use_smoke and all_smoke:
+        arrays["is_smoke"] = np.stack(all_smoke, axis=0)
+        arrays["btd_fire_smoke"] = np.stack(all_btd, axis=0)
+        arrays["blue_swir_smoke_ratio"] = np.stack(all_blue_swir, axis=0)
+        n_smoke_pixels = int(arrays["is_smoke"].sum())
+        n_cloud_pixels = int(cloud_stack.sum())
+        logger.info(
+            "smoke_discrimination_stats",
+            smoke_pixels=n_smoke_pixels,
+            remaining_cloud_pixels=n_cloud_pixels,
+            smoke_fraction=round(
+                n_smoke_pixels / max(n_smoke_pixels + n_cloud_pixels, 1), 3
+            ),
+        )
+
     metadata: dict[str, Any] = {
         "fire_name": fire_name,
         "year": fire.year,
@@ -202,6 +243,7 @@ def download_fire_stack(
         "pipeline": "wildfire-data-pipeline",
         "cloud_masking": True,
         "multi_source_fusion": True,
+        "smoke_discrimination": use_smoke,
         "failed_hours": failed_hours,
         "failure_rate": failure_rate,
     }
@@ -306,6 +348,23 @@ def download_features(
         logger.warning("slow_feature_failed", feature="smoke_aerosol", error=str(e))
         slow_bands["smoke_aerosol_index"] = np.zeros((n_rows, n_cols), dtype=np.float32)
 
+    # --- Slow-varying: NDWI fuel moisture ---
+    from wildfire_pipeline.gee.features import get_pre_fire_ndwi
+
+    try:
+        ndwi_img = get_pre_fire_ndwi(aoi, start).reproject(
+            crs=pipeline.export_crs, scale=pipeline.export_scale_m
+        )
+        ndwi_sample = safe_sample_rectangle(ndwi_img, aoi)
+        ndwi_info = safe_get_info(ndwi_sample)
+        for band, values in ndwi_info["properties"].items():
+            slow_bands[band] = np.array(values, dtype=np.float32)
+    except Exception as e:
+        if isinstance(e, (TypeError, AttributeError, KeyError, ImportError)):
+            raise
+        logger.warning("slow_feature_failed", feature="ndwi", error=str(e))
+        slow_bands["ndwi"] = np.zeros((n_rows, n_cols), dtype=np.float32)
+
     # --- Hourly features (RTMA + soil moisture + precipitation) ---
     from wildfire_pipeline.gee.weather import (
         get_hourly_gpm_precipitation,
@@ -320,22 +379,27 @@ def download_features(
         hour_end = start.advance(h + 1, "hour")
 
         try:
-            soil = get_hourly_soil_moisture(aoi, hour_start, hour_end)
-            precip_era5 = get_hourly_precipitation(aoi, hour_start, hour_end)
-            precip_gpm = get_hourly_gpm_precipitation(aoi, hour_start, hour_end)
+            # Reproject each source INDEPENDENTLY before combining.
+            # Different source collections (RTMA 2.5km, ERA5 11km, GPM 10km)
+            # have different native grids. If combined first then reprojected,
+            # GEE's grid snapping can produce a different pixel grid than GOES,
+            # causing spatial dimension mismatches with the label arrays.
+            crs = pipeline.export_crs
+            sc = pipeline.export_scale_m
+            soil = get_hourly_soil_moisture(aoi, hour_start, hour_end).reproject(crs=crs, scale=sc)
+            precip_era5 = get_hourly_precipitation(aoi, hour_start, hour_end).reproject(crs=crs, scale=sc)
+            precip_gpm = get_hourly_gpm_precipitation(aoi, hour_start, hour_end).reproject(crs=crs, scale=sc)
             if pipeline.rtma_wind:
-                rtma = get_hourly_rtma(aoi, hour_start, hour_end)
+                rtma = get_hourly_rtma(aoi, hour_start, hour_end).reproject(crs=crs, scale=sc)
                 combined = (
                     rtma.addBands(soil)
                     .addBands(precip_era5)
                     .addBands(precip_gpm)
-                    .reproject(crs=pipeline.export_crs, scale=pipeline.export_scale_m)
                 )
             else:
                 combined = (
                     soil.addBands(precip_era5)
                     .addBands(precip_gpm)
-                    .reproject(crs=pipeline.export_crs, scale=pipeline.export_scale_m)
                 )
 
             info = safe_get_info(safe_sample_rectangle(combined, aoi))  # ONE call
@@ -385,11 +449,11 @@ def download_features(
         day_end = start.advance(d, "day")
 
         try:
-            gridmet = get_daily_gridmet(aoi, day_start, day_end)
-            lst = get_daily_lst(aoi, day_start, day_end)
-            combined = gridmet.addBands(lst).reproject(
-                crs=pipeline.export_crs, scale=pipeline.export_scale_m
-            )
+            crs = pipeline.export_crs
+            sc = pipeline.export_scale_m
+            gridmet = get_daily_gridmet(aoi, day_start, day_end).reproject(crs=crs, scale=sc)
+            lst = get_daily_lst(aoi, day_start, day_end).reproject(crs=crs, scale=sc)
+            combined = gridmet.addBands(lst)
             info = safe_get_info(safe_sample_rectangle(combined, aoi))  # ONE call
             props = info["properties"]
             for band_name, values in props.items():
@@ -436,6 +500,29 @@ def download_features(
         repeated = np.repeat(np.stack(day_frames, axis=0), 24, axis=0)[:n_hours]
         arrays[f"daily_{name}"] = repeated
 
+    # --- Grid shape validation ---
+    # All spatial grids must match. Use static bands as reference since they
+    # come from a single GEE call and are most reliable.
+    ref_shape: tuple[int, int] | None = None
+    for name, arr in arrays.items():
+        spatial = arr.shape[-2:]
+        if ref_shape is None:
+            ref_shape = spatial
+        elif spatial != ref_shape:
+            logger.warning(
+                "grid_shape_mismatch",
+                band=name,
+                expected=ref_shape,
+                actual=spatial,
+                action="resampling",
+            )
+    if ref_shape is not None:
+        from wildfire_pipeline.processing.quality import align_feature_grids
+
+        arrays, resampled = align_feature_grids(arrays, ref_shape)
+        if resampled:
+            logger.info("auto_aligned_grids", count=len(resampled), bands=resampled[:5])
+
     # --- Temporal encoding (computed locally, no GEE calls) ---
     from datetime import UTC
 
@@ -443,15 +530,19 @@ def download_features(
         fire.start_utc.replace(tzinfo=UTC) if fire.start_utc.tzinfo is None else fire.start_utc
     )
 
+    # Use actual grid shape from downloaded data, NOT the theoretical compute_grid_shape().
+    # GEE's pixel snapping can produce different dimensions than the formula predicts.
+    actual_h, actual_w = ref_shape if ref_shape is not None else (n_rows, n_cols)
+
     # Hour of day (diurnal cycle) — sin/cos encoding
     hour_of_day = np.array([(start_dt.hour + h) % 24 for h in range(n_hours)], dtype=np.float32)
     arrays["temporal_hour_sin"] = np.broadcast_to(
         (np.sin(2 * np.pi * hour_of_day / 24.0))[:, np.newaxis, np.newaxis],
-        (n_hours, n_rows, n_cols),
+        (n_hours, actual_h, actual_w),
     ).copy()
     arrays["temporal_hour_cos"] = np.broadcast_to(
         (np.cos(2 * np.pi * hour_of_day / 24.0))[:, np.newaxis, np.newaxis],
-        (n_hours, n_rows, n_cols),
+        (n_hours, actual_h, actual_w),
     ).copy()
 
     # Day of year (seasonal cycle)
@@ -461,11 +552,11 @@ def download_features(
     )
     arrays["temporal_doy_sin"] = np.broadcast_to(
         (np.sin(2 * np.pi * day_of_year / 365.25))[:, np.newaxis, np.newaxis],
-        (n_hours, n_rows, n_cols),
+        (n_hours, actual_h, actual_w),
     ).copy()
     arrays["temporal_doy_cos"] = np.broadcast_to(
         (np.cos(2 * np.pi * day_of_year / 365.25))[:, np.newaxis, np.newaxis],
-        (n_hours, n_rows, n_cols),
+        (n_hours, actual_h, actual_w),
     ).copy()
 
     # --- Normalization statistics for ML training ---
@@ -475,7 +566,7 @@ def download_features(
         "fire_name": fire_name,
         "year": fire.year,
         "n_hours": n_hours,
-        "grid_shape": [n_rows, n_cols],
+        "grid_shape": [actual_h, actual_w],
         "aoi": aoi_coords,
         "feature_type": "multi_channel",
         "hourly_bands": sorted(hourly_stacks.keys()),

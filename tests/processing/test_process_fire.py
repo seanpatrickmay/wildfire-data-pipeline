@@ -55,6 +55,8 @@ class TestProcessFireHappyPath:
             "prev_fire_state",
             "prev_distance_to_fire",
             "prev_fire_neighborhood",
+            "is_smoke",
+            "btd_fire_smoke",
             "loss_weights",
             "_diag_raw_confidence",
             "_diag_capped_frp",
@@ -644,6 +646,100 @@ class TestTypedConfig:
             tmp_path, sample_fire_arrays, sample_metadata, pipeline_config
         )
         assert "labels" in out_arrays
+
+
+# ---------------------------------------------------------------------------
+# Smoke discrimination integration
+# ---------------------------------------------------------------------------
+
+
+class TestSmokeDiscriminationIntegration:
+    """Verify smoke data flows correctly through the processing pipeline."""
+
+    @staticmethod
+    def _make_smoke_arrays(T: int = 10, H: int = 5, W: int = 5):
+        """Create synthetic fire data WITH smoke discrimination arrays."""
+        rng = np.random.default_rng(42)
+
+        confidence = np.zeros((T, H, W), dtype=np.float32)
+        for t in range(T):
+            radius = min(t + 1, 2)
+            center = H // 2, W // 2
+            for i in range(max(0, center[0] - radius), min(H, center[0] + radius + 1)):
+                for j in range(max(0, center[1] - radius), min(W, center[1] + radius + 1)):
+                    confidence[t, i, j] = rng.uniform(0.3, 1.0)
+
+        obs_valid = np.ones((T, H, W), dtype=np.float32)
+        obs_valid[3] = 0.0  # fully cloudy hour
+        cloud_mask = (1.0 - obs_valid).astype(np.float32)
+        frp = (confidence * rng.uniform(0, 100, size=(T, H, W))).astype(np.float32)
+
+        # Smoke: some of the "cloud" pixels at hour 3 are actually smoke
+        is_smoke = np.zeros((T, H, W), dtype=np.float32)
+        is_smoke[3, :3, :3] = 1.0  # top-left 3x3 at hour 3 is smoke, not cloud
+
+        # BTD values: positive for smoke pixels (fire underneath)
+        btd_fire_smoke = np.zeros((T, H, W), dtype=np.float32)
+        btd_fire_smoke[3, :3, :3] = 5.0  # warm BTD = smoke/fire
+
+        return {
+            "data": confidence,
+            "observation_valid": obs_valid,
+            "cloud_mask": cloud_mask,
+            "frp": frp,
+            "is_smoke": is_smoke,
+            "btd_fire_smoke": btd_fire_smoke,
+        }
+
+    def test_smoke_pixels_get_smoke_weight_in_loss(self, tmp_path, pipeline_config):
+        """Smoke-reclassified pixels should get smoke_training_weight in loss_weights."""
+        arrays = self._make_smoke_arrays()
+        metadata = {"fire_name": "SmokeTest", "n_hours": 10}
+
+        out_arrays, _ = _save_and_process(tmp_path, arrays, metadata, pipeline_config)
+
+        # Smoke pixels at hour 3 should have intermediate weight, not 0
+        smoke_pixel_weight = out_arrays["loss_weights"][3, 0, 0]
+        assert smoke_pixel_weight > 0.0, "Smoke pixel should not be excluded from loss"
+
+    def test_smoke_metadata_populated(self, tmp_path, pipeline_config):
+        """Metadata should report smoke pixel counts when smoke data present."""
+        arrays = self._make_smoke_arrays()
+        metadata = {"fire_name": "SmokeMetaTest", "n_hours": 10}
+
+        _, out_meta = _save_and_process(tmp_path, arrays, metadata, pipeline_config)
+
+        assert out_meta["processing"]["smoke_discrimination"] is True
+        assert out_meta["quality"]["smoke_pixels"] > 0
+        assert out_meta["quality"]["smoke_fraction"] > 0.0
+
+    def test_smoke_arrays_in_output(self, tmp_path, pipeline_config):
+        """Output should contain is_smoke and btd_fire_smoke arrays."""
+        arrays = self._make_smoke_arrays()
+        metadata = {"fire_name": "SmokeOutputTest", "n_hours": 10}
+
+        out_arrays, _ = _save_and_process(tmp_path, arrays, metadata, pipeline_config)
+
+        assert "is_smoke" in out_arrays
+        assert "btd_fire_smoke" in out_arrays
+        assert out_arrays["is_smoke"].sum() > 0
+        assert out_arrays["btd_fire_smoke"][3, 0, 0] == pytest.approx(5.0)
+
+    def test_no_smoke_data_gives_zero_smoke_metrics(self, tmp_path, pipeline_config):
+        """Without smoke arrays in input, smoke metrics should be zero."""
+        T, H, W = 10, 3, 3
+        arrays = {
+            "data": np.full((T, H, W), 0.5, dtype=np.float32),
+            "observation_valid": np.ones((T, H, W), dtype=np.float32),
+            "cloud_mask": np.zeros((T, H, W), dtype=np.float32),
+            "frp": np.zeros((T, H, W), dtype=np.float32),
+        }
+        metadata = {"fire_name": "NoSmokeTest", "n_hours": T}
+
+        _, out_meta = _save_and_process(tmp_path, arrays, metadata, pipeline_config)
+
+        assert out_meta["processing"]["smoke_discrimination"] is False
+        assert out_meta["quality"]["smoke_pixels"] == 0
 
     def test_custom_typed_config_values_respected(
         self, tmp_path, sample_fire_arrays, sample_metadata

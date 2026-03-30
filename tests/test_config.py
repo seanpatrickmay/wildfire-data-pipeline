@@ -121,6 +121,8 @@ class TestPipelineConfig:
         assert pc.imputation_weight == pytest.approx(0.3)
         assert pc.download_features is True
         assert pc.rtma_wind is True
+        assert pc.smoke_discrimination is True
+        assert pc.smoke_training_weight == pytest.approx(0.6)
 
     def test_confidence_threshold_too_high(self):
         with pytest.raises(ValidationError, match="goes_confidence_threshold"):
@@ -155,6 +157,24 @@ class TestPipelineConfig:
     def test_imputation_weight_custom_value(self):
         pc = PipelineConfig(imputation_weight=0.5)
         assert pc.imputation_weight == pytest.approx(0.5)
+
+    def test_smoke_discrimination_can_be_disabled(self):
+        pc = PipelineConfig(smoke_discrimination=False)
+        assert pc.smoke_discrimination is False
+
+    def test_smoke_training_weight_must_be_in_range(self):
+        with pytest.raises(ValidationError, match="smoke_training_weight"):
+            PipelineConfig(smoke_training_weight=1.5)
+        with pytest.raises(ValidationError, match="smoke_training_weight"):
+            PipelineConfig(smoke_training_weight=-0.1)
+
+    def test_smoke_training_weight_boundaries(self):
+        PipelineConfig(smoke_training_weight=0.0)
+        PipelineConfig(smoke_training_weight=1.0)
+
+    def test_smoke_training_weight_custom_value(self):
+        pc = PipelineConfig(smoke_training_weight=0.8)
+        assert pc.smoke_training_weight == pytest.approx(0.8)
 
 
 class TestLabelSmoothing:

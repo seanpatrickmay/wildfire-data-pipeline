@@ -54,6 +54,21 @@ class PipelineConfig(BaseModel):
         default=True,
         description="Use RTMA for hourly wind (2.5km). Falls back to GRIDMET daily if False.",
     )
+    smoke_discrimination: bool = Field(
+        default=True,
+        description=(
+            "Use GOES ABI brightness temperatures to distinguish smoke from cloud. "
+            "Reclassifies DQF==2 'cloud' pixels as 'smoke' where BTD(3.9-11.2μm) "
+            "indicates semi-transparent aerosol rather than opaque cloud. Smoke pixels "
+            "remain valid for training rather than being excluded."
+        ),
+    )
+    smoke_training_weight: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description="Training loss weight for smoke-reclassified pixels (between cloud=0 and clear=1)",
+    )
 
 
 class FiresConfig(BaseModel):
